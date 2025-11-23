@@ -1,0 +1,12 @@
+*.pyc
+.DS_Store
+docs/_build
+docs/.ipynb_checkpoints/
+build/
+dist/
+exogaia.egg-info/
+.coverage*
+coverage.xml
+.pytest_cache/
+htmlcov/
+.tox/

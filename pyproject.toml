@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exogaia"
+authors = [{name = "Tomas Stolker", email = "stolker@strw.leidenuniv.nl"}]
+description = "Tool for analyzing Gaia epoch astrometry"
+readme = "README.rst"
+requires-python = ">=3.10,<3.13"
+license = "MIT"
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "astroquery",
+    "matplotlib",
+    "numpy",
+    "typeguard",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+docs = [
+    "jupyter",
+    "nbsphinx",
+    "pandoc",
+    "sphinx",
+    "sphinx-automodapi",
+    "sphinx_book_theme",
+]
+test = [
+    "black",
+    "flake8",
+    "pycodestyle",
+    "pylint",
+    "pytest",
+    "pytest-cov",
+]
+
+[project.urls]
+Documentation = "https://exogaia.readthedocs.io"
+Repository = "https://github.com/tomasstolker/exogaia"
+Issues = "https://github.com/tomasstolker/exogaia/issues"
+
+[tool.setuptools]
+packages = ["exogaia"]
+
+[tool.setuptools_scm]
+write_to = "exogaia/_version.py"
