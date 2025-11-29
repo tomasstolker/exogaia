@@ -5,7 +5,7 @@
 
     |PyPI Status| |Python Versions| |CI Status| |Docs Status| |Code Coverage| |Code Quality| |License|
 
-*exogaia* is a tool for analyzing Gaia epoch astrometry. The package has been released on `PyPI <https://pypi.org/project/exogaia/>`_ and is actively developed and maintained on Github.
+*exogaia* is a tool for analyzing Gaia epoch astrometry.
 
 Documentation
 -------------
