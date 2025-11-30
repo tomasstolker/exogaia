@@ -17,7 +17,6 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
 dependencies = [
-    "astroquery",
     "corner",
     "h5py",
     "healpy",
