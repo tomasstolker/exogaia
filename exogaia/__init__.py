@@ -25,14 +25,14 @@ print("========\nexogaia\n========")
 
 # Check if there is a new version available
 
-exogaia_version = (
+EXOGAIA_VERSION = (
     f"{__version_tuple__[0]}." f"{__version_tuple__[1]}." f"{__version_tuple__[2]}"
 )
 
-try:
-    pypi_url = "https://pypi.org/pypi/exogaia/json"
+PYPI_URL = "https://pypi.org/pypi/exogaia/json"
 
-    with urllib.request.urlopen(pypi_url, timeout=1.0) as open_url:
+try:
+    with urllib.request.urlopen(PYPI_URL, timeout=1.0) as open_url:
         url_content = open_url.read()
         url_data = json.loads(url_content)
         pypi_version = url_data["info"]["version"]
@@ -44,7 +44,7 @@ print(f"\nVersion: {__version__}")
 
 if pypi_version is not None:
     pypi_split = pypi_version.split(".")
-    current_split = exogaia_version.split(".")
+    current_split = EXOGAIA_VERSION.split(".")
 
     new_major = (pypi_split[0] == current_split[0]) & (pypi_split[1] > current_split[1])
 

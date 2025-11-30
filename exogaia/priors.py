@@ -47,7 +47,6 @@ class LogUniformPrior(Prior):
         return np.exp(samples)
 
 
-
 class NormalPrior(Prior):
     def __init__(self, mu, sigma, truncate_zero=True):
         self.mu = mu

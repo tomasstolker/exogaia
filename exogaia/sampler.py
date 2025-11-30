@@ -244,7 +244,7 @@ class NestedSampler(ExoGaia):
         # Nested sampling log-evidence
         self.ln_z = sampling_stats["nested sampling global log-evidence"]
         self.ln_z_error = sampling_stats["nested sampling global log-evidence error"]
-        print(f"\nln(Z) = {self.ln_z:.2f} +/- {self.ln_z_error:.2f}")
+        print(f"ln(Z) = {self.ln_z:.2f} +/- {self.ln_z_error:.2f}")
 
         # Nested importance sampling log-evidence
         imp_ln_z = sampling_stats["nested importance sampling global log-evidence"]
