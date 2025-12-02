@@ -3,7 +3,7 @@
 Installation
 ============
 
-``exogaia`` is compatible with `Python <https://www.python.org>`_ versions 3.10/3.11/3.12 and is available in the `PyPI repository <https://pypi.org/project/exogaia/>`_ and on `Github <https://github.com/tomasstolker/exogaia>`_.
+``exogaia`` is compatible with `Python <https://www.python.org>`_ versions 3.11/3.12/3.13 and is available in the `PyPI repository <https://pypi.org/project/exogaia/>`_ and on `Github <https://github.com/tomasstolker/exogaia>`_.
 
 Installation from PyPI
 ----------------------

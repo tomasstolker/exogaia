@@ -3,11 +3,10 @@ Module for handling epoch astrometry data.
 """
 
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 import h5py
 import healpy
-import kepler
 import numpy as np
 import pandas as pd
 import pooch
@@ -17,6 +16,7 @@ from astropy.table import Table
 from astropy.time import Time
 
 from exogaia.core import ExoGaia
+from exogaia.model import BinaryModel
 
 # from astroquery.gaia import Gaia
 # Gaia.ROW_LIMIT = -1
@@ -109,14 +109,14 @@ class EpochAstrometry(ExoGaia):
         pmdec,
         m1,
         m2,
-        period,
+        sma,
         Tp,
         ecc,
         pan,
         inc,
         aop,
         phot_g_mean_mag,
-        f=0.0,
+        csv_out: Optional[str] = None,
     ):
         """
         Method to predict the epoch astrometry for a binary
@@ -139,11 +139,11 @@ class EpochAstrometry(ExoGaia):
         pmdec : float
             The true proper motions in mas/yr
         m1 : float
-            Mass of the star more luminous in the G-band, in Msun
+            Mass of the primary, in Msun
         m2 : float
-            Mass of the other star, in Msun
-        period : float
-            Orbital period in days
+            Mass of the companion, in Msun
+        sma : float
+            Semi-major axis in au
         Tp : float
             Periastron time in days
         ecc : float
@@ -157,8 +157,8 @@ class EpochAstrometry(ExoGaia):
             "little omega" in radians
         phot_g_mean_mag : float
             G-band magnitude
-        f : float
-            flux ratio, F2/F1, in the G-band (default: 0.0)
+        csv_out : str
+            Output file
 
         MIT License
 
@@ -212,11 +212,36 @@ class EpochAstrometry(ExoGaia):
             "ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]"
         ]
 
+        # https://www.cosmos.esa.int/web/gaia/dr3
+        # Gaia DR3 data (both Gaia EDR3 and the full Gaia DR3) is based on
+        # data collected between 25 July 2014 (10:30 UTC) and 28 May 2017
+        # (08:44 UTC) spanning a period of 34 months of data collection.
+        # The reference epoch for Gaia DR3 is 2016.0.
+
+        # https://www.cosmos.esa.int/web/gaia/dr4
+        # Gaia DR4 data is based on data collected between 25 July 2014
+        # (10:30 UTC) and 20 January 2020 (22:00 UTC) spanning a period
+        # of 66 months of data collection.
+        # The reference epoch for Gaia DR4 is J2017.5.
+
+        # Positions and proper motions are referred to the ICRS, to which
+        # the optical reference frame defined by Gaia DR4 (Gaia-CRF4) is
+        # aligned. The time coordinate for Gaia DR4 results is the
+        # barycentric coordinate time (TCB).
+
+        t_start = Time("2014-07-25 10:30:00", scale="utc")
+
         if self.gaia_release == "DR3":
-            time_select = (obs_time_full > 2456891.5) & (obs_time_full < 2457902)
+            t_end = Time("2017-05-28 08:44:00", scale="utc")
+            time_select = (obs_time_full > t_start.tcb.jd) & (
+                obs_time_full < t_end.tcb.jd
+            )
 
         elif self.gaia_release == "DR4":
-            time_select = (obs_time_full > 2456891.5) & (obs_time_full < 2458868.5)
+            t_end = Time("2020-01-20 22:00:00", scale="utc")
+            time_select = (obs_time_full > t_start.tcb.jd) & (
+                obs_time_full < t_end.tcb.jd
+            )
 
         elif self.gaia_release == "DR5":
             time_select = np.ones(len(healp_table), dtype=bool)
@@ -231,9 +256,9 @@ class EpochAstrometry(ExoGaia):
 
         # Reject 10% of the data
         # See Sect. 3.3 in El-Badry et al. (2024)
-        rand_gen = np.random.default_rng()
-        rand_unif = rand_gen.uniform(low=0.0, high=1.0, size=len(table_select))
-        table_select = table_select[rand_unif > 0.1]
+        # rand_gen = np.random.default_rng()
+        # rand_unif = rand_gen.uniform(low=0.0, high=1.0, size=len(table_select))
+        # table_select = table_select[rand_unif > 0.1]
 
         psi, plx_factor, obs_time_tcb = (
             table_select["scanAngle[rad]"],
@@ -244,7 +269,7 @@ class EpochAstrometry(ExoGaia):
         t_ast_day = obs_time_tcb - self.ref_epoch.jd
         t_ast_yr = t_ast_day / 365.25
 
-        # Uncertainty per CCD -- so not per FoV trnasit.
+        # Uncertainty per CCD -- so not per FoV transit.
         # This gives the uncertainty *per CCD* (not per FOV transit),
         # taken from Fig. 3 in https://arxiv.org/abs/2206.05439
         # This is the "EDR3 adjusted" line from that figure, which
@@ -260,111 +285,45 @@ class EpochAstrometry(ExoGaia):
         sigma_eta += [0.36, 0.63, 1.05, 2.05, 4.1]
 
         sigma_per_ccd = np.interp(phot_g_mean_mag, g_vals, sigma_eta)
-        epoch_err_per_transit = sigma_per_ccd / np.sqrt(n_ccd_avg)
-
-        if phot_g_mean_mag < 13:
-            extra_noise = rand_gen.uniform(low=0, high=0.04, size=1)
-        else:
-            extra_noise = 0
-
-        mean_anom_obs = 2.0 * np.pi / period * (t_ast_day - Tp)
-        EE, _, _ = kepler.kepler(mean_anom_obs, ecc)
-
-        a_au = ((m1 + m2) * (period / 365.25) ** 2) ** (1 / 3)
-        a_mas = a_au * parallax
-
-        A_pred = a_mas * (
-            np.cos(aop) * np.cos(pan) - np.sin(aop) * np.sin(pan) * np.cos(inc)
-        )
-        B_pred = a_mas * (
-            np.cos(aop) * np.sin(pan) + np.sin(aop) * np.cos(pan) * np.cos(inc)
-        )
-        F_pred = -a_mas * (
-            np.sin(aop) * np.cos(pan) + np.cos(aop) * np.sin(pan) * np.cos(inc)
-        )
-        G_pred = -a_mas * (
-            np.sin(aop) * np.sin(pan) - np.cos(aop) * np.cos(pan) * np.cos(inc)
-        )
-        cpsi, spsi = np.cos(psi), np.sin(psi)
-
-        X = np.cos(EE) - ecc
-        Y = np.sqrt(1 - ecc**2) * np.sin(EE)
-
-        x, y = B_pred * X + G_pred * Y, A_pred * X + F_pred * Y
-        delta_eta = -y * cpsi - x * spsi
-
-        def al_bias_binary(delta_eta, q, f, ang_res=90):
-            """
-            This function predicts the epoch astrometry for a
-            binary assuming that the 1D centroid is at the peak
-            of the combined AL flux profile, following the model
-            from Lindegren+2022
-            q = m2/m1 is the flux ratio
-            f = F2/F1 is the light ratio
-            u is the effective angular resolution in mas.
-            delta_eta = rho*cos(psi-theta) = (-y*cos(psi) - x*sin(psi))
-                where rho is the angular separation between the
-                two stars, psi is the scan angle, and theta is
-                position angle.
-            """
-
-            def solve_for_x(ff, xi, tol=1e-6, niter_max=100):
-                """
-                ff is flux ratio, xi is angular separation in units of angular resolution.
-                tol is a tolerance to monitor convergence.
-                niter_max is the maximum number of iterations
-                """
-                x = 0.0
-                for _ in range(niter_max):
-                    thisx = ff * xi / (ff + np.exp(0.5 * xi**2 - xi * x))
-                    if abs(thisx - x) < tol:
-                        break
-                    x = thisx
-                return x
-
-            # the first two cases reduce to the same thing, but
-            # it's better to separate them for numerical stability.
-            if np.abs(delta_eta / ang_res) <= 0.1:
-                deta = (f / (1 + f) - q / (1 + q)) * delta_eta
-
-            elif (
-                np.abs(delta_eta / ang_res) > 0.1
-                and np.abs(delta_eta / ang_res) <= 3 - f
-            ):
-                B = solve_for_x(ff=f, xi=delta_eta / ang_res)
-                deta = ang_res * B - q / (1 + q) * delta_eta
-
-            elif np.abs(delta_eta / ang_res) > 3 - f:
-                deta = -q / (1 + q) * delta_eta
-
-            else:
-                raise ValueError("TODO")
-
-            return deta
-
-        bias = np.array(
-            [
-                al_bias_binary(delta_eta=delta_eta[i], q=m2 / m1, f=f)
-                for i in range(len(psi))
-            ]
-        )
-
-        cen_pos = (
-            pmra * t_ast_yr * spsi + pmdec * t_ast_yr * cpsi + parallax * plx_factor
-        )
-
-        cen_pos += bias
-        cen_pos += epoch_err_per_transit * np.random.randn(len(psi))
-        cen_pos += extra_noise * np.random.randn(len(psi))
+        sigma_per_transit = sigma_per_ccd / np.sqrt(n_ccd_avg)
 
         sim_astrom = {
             "obs_time_tcb": t_ast_yr + self.ref_epoch.jyear,
             "relative_time_year": t_ast_yr,
             "relative_time_day": t_ast_yr * u.year.to(u.day),
-            "centroid_pos_al": cen_pos,
-            "centroid_pos_error_al": np.full(cen_pos.size, epoch_err_per_transit),
             "scan_pos_angle": psi,
             "parallax_factor_al": plx_factor,
         }
 
         self.data_table = pd.DataFrame(sim_astrom)
+
+        model_params = [
+            ra,
+            dec,
+            parallax,
+            pmra,
+            pmdec,
+            sma,
+            ecc,
+            inc,
+            aop,
+            pan,
+            Tp,
+            m1,
+            m2,
+        ]
+
+        bin_model = BinaryModel(self)
+        cen_pos = bin_model.calc_model(model_params=model_params)
+
+        rng = np.random.default_rng()
+        cen_pos += rng.normal(loc=0.0, scale=sigma_per_transit, size=len(psi))
+
+        self.data_table["centroid_pos_al"] = cen_pos
+
+        self.data_table["centroid_pos_error_al"] = np.full(
+            cen_pos.size, sigma_per_transit
+        )
+
+        if csv_out is not None:
+            self.data_table.to_csv(csv_out, index=False)

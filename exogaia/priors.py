@@ -23,9 +23,10 @@ class UniformPrior(Prior):
     def __init__(self, min_val, max_val):
         self.min_val = min_val
         self.max_val = max_val
+        self.rng = np.random.default_rng()
 
     def draw_samples(self, n_samples):
-        samples = np.random.Generator.uniform(low=0.0, high=1.0, size=n_samples)
+        samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
 
         return self.transform_samples(samples)
 
@@ -37,14 +38,15 @@ class LogUniformPrior(Prior):
     def __init__(self, min_val, max_val):
         self.log_min = np.log(min_val)
         self.log_max = np.log(max_val)
+        self.rng = np.random.default_rng()
 
     def draw_samples(self, n_samples):
-        samples = np.random.Generator.uniform(low=0.0, high=1.0, size=n_samples)
+        samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
         return self.transform_samples(samples)
 
     def transform_samples(self, unit_samples):
         samples = self.log_min + (self.log_max - self.log_min) * unit_samples
-        return np.exp(samples)
+        return 10.0**samples
 
 
 class NormalPrior(Prior):
@@ -52,9 +54,10 @@ class NormalPrior(Prior):
         self.mu = mu
         self.sigma = sigma
         self.truncate_zero = truncate_zero
+        self.rng = np.random.default_rng()
 
     def draw_samples(self, n_samples):
-        samples = np.random.Generator.uniform(low=0.0, high=1.0, size=n_samples)
+        samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
 
         return self.transform_samples(samples)
 
@@ -79,10 +82,10 @@ class NormalPrior(Prior):
 
 class SinPrior(Prior):
     def __init__(self):
-        pass
+        self.rng = np.random.default_rng()
 
     def draw_samples(self, n_samples):
-        samples = np.random.Generator.uniform(low=0.0, high=1.0, size=n_samples)
+        samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
         return self.transform_samples(samples)
 
     def transform_samples(self, unit_samples):

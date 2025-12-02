@@ -14,6 +14,8 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath('../'))
 
+import sphinx_readable_theme
+
 # -- Project information -----------------------------------------------------
 
 project = 'exogaia'
@@ -46,11 +48,11 @@ exclude_patterns = ['_build',
 
 # -- Options for HTML output -------------------------------------------------
 
-html_theme = 'pydata_sphinx_theme'
+html_theme = 'readable'
+html_theme_path = [sphinx_readable_theme.get_html_theme_path()]
 
 html_theme_options = {
     'github_url': 'https://github.com/tomasstolker/exogaia',
-    'use_edit_page_button': True,
 }
 
 html_context = {

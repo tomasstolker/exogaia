@@ -26,7 +26,7 @@ except:
 from exogaia.core import ExoGaia
 from exogaia.data import EpochAstrometry
 from exogaia.model import BinaryModel
-from exogaia.priors import LogUniformPrior, SinPrior, UniformPrior
+from exogaia.priors import LogUniformPrior, NormalPrior, SinPrior, UniformPrior
 
 
 class NestedSampler(ExoGaia):
@@ -43,21 +43,25 @@ class NestedSampler(ExoGaia):
             None
         """
 
+        self.epoch_astrometry = epoch_astrometry
         self.data_table = epoch_astrometry.data_table
         self.primary_mass = epoch_astrometry.primary_mass
 
+        # Set default priors
         self.priors = {}
-        self.priors["sma"] = LogUniformPrior(1e-3, 1.0)
+        self.priors["ra"] = UniformPrior(-10.0, 10.0)
+        self.priors["dec"] = UniformPrior(-10.0, 10.0)
+        self.priors["parallax"] = UniformPrior(0.0, 100.0)
+        self.priors["pmra"] = UniformPrior(-50.0, 50.0)
+        self.priors["pmdec"] = UniformPrior(-50.0, 50.0)
+        self.priors["sma"] = LogUniformPrior(1e-3, 2.0)
         self.priors["ecc"] = UniformPrior(0.0, 1.0)
         self.priors["inc"] = SinPrior()
         self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
         self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
         self.priors["tau"] = UniformPrior(0.0, 1.0)
-
-        if epoch_astrometry.primary_mass is None:
-            self.priors["mtot"] = UniformPrior(0.0, 5.0)
-        else:
-            self.priors["mtot"] = UniformPrior(0.0, 5.0)
+        self.priors["m1"] = NormalPrior(self.primary_mass[0], self.primary_mass[1])
+        self.priors["m2"] = UniformPrior(0.0, 1)
 
         self.output_folder = None
         self.ln_z = None
@@ -79,6 +83,7 @@ class NestedSampler(ExoGaia):
         self.print_section("Orbit fit with MultiNest")
 
         self.output_folder = output_folder
+        self.m2_min = self.priors["m2"].min_val
 
         # Create empty dictionary if needed
 
@@ -132,86 +137,78 @@ class NestedSampler(ExoGaia):
             os.mkdir(self.output_folder)
 
         # Number of model parameters
-        n_params = 5 + 7
+        n_params = 5 + 8
 
         binary_model = BinaryModel(
-            data_table=self.data_table, primary_mass=self.primary_mass
+            epoch_astrometry=self.epoch_astrometry, verbose=False
         )
 
         def prior_transform(cube, n_dim: int, n_param: int):
             """
-            Prior transform.
+            Prior transform
             """
 
-            R = {
-                "delta_ra0_halfspan": 20.0,  # mas (so delta_RA0 in [-span, +span])
-                "delta_dec0_halfspan": 20.0,  # mas
-                "mu_max": 50.0,  # mas/yr (so mu in [-mu_max, +mu_max])
-                "parallax_min": 0.0,
-                "parallax_max": 20.0,  # mas
-                "sma_min": 0.000001,
-                "sma_max": 0.1,  # a (uniform)
-                "log_sma_min": -10,
-                "log_sma_max": 0,  # log10(a/au) (log-uniform)
-                "ecc_min": 0.0,
-                "ecc_max": 1.0,  # eccentricity
-                "tau_min": 0.0,
-                "tau_max": 1.0,  # time units (e.g. fractional year or MJD span)
-                "mtot_min": self.primary_mass[0],  # System mass (Msun)
-                "mtot_max": 10.0,
-            }
+            # delta_RA, delta_Dec (mas)
+            # Default: uniform [-10, 10]
+            cube[0] = self.priors["ra"].draw_samples(1)
+            cube[1] = self.priors["dec"].draw_samples(1)
 
-            # --- 5-parameter astrometry ---
-            # delta_RA0, delta_DEC0 : uniform in [-halfspan, +halfspan] (mas)
-            dra0_span = R["delta_ra0_halfspan"]
-            ddec0_span = R["delta_dec0_halfspan"]
-            cube[0] = -dra0_span + cube[0] * (2.0 * dra0_span)
-            cube[1] = -ddec0_span + cube[1] * (2.0 * ddec0_span)
+            # Parallax (mas)
+            # Default: uniform [0, 100]
+            cube[2] = self.priors["parallax"].draw_samples(1)
 
-            # proper motions: uniform in [-mu_max, +mu_max] (mas/yr)
-            mu_max = R["mu_max"]
-            cube[2] = -mu_max + cube[2] * (2.0 * mu_max)
-            cube[3] = -mu_max + cube[3] * (2.0 * mu_max)
+            # Proper motion (mas/yr)
+            # Default: uniform [-50, 50]
+            cube[3] = self.priors["pmra"].draw_samples(1)
+            cube[4] = self.priors["pmdec"].draw_samples(1)
 
-            # parallax: uniform between parallax_min and parallax_max (mas)
-            cube[4] = R["parallax_min"] + cube[4] * (
-                R["parallax_max"] - R["parallax_min"]
-            )
+            # Semi-major axis (au)
+            # Default: log-uniform [log10(1e-3), log10(2)]
+            cube[5] = self.priors["sma"].draw_samples(1)
 
-            # Semimajor axis a: log-uniform between a_min and a_max
-            # cube[5] = R["log_sma_min"] + cube[5] * (R["log_sma_max"] - R["log_sma_min"])
-            cube[5] = R["sma_min"] + cube[5] * (R["sma_max"] - R["sma_min"])
+            # Eccentricity
+            # Default: uniform [0, 1]
+            cube[6] = self.priors["ecc"].draw_samples(1)
 
-            # Eccentricity: uniform [0, 1)
-            cube[6] = R["ecc_min"] + cube[6] * (R["ecc_max"] - R["ecc_min"])
+            # Inclination (rad)
+            # Default: isotropic -> i = arccos(1 - 2u)
+            cube[7] = self.priors["inc"].draw_samples(1)
 
-            # Inclination: isotropic -> i = arccos(1 - 2u)
-            cube[7] = np.arccos(1.0 - 2.0 * cube[7])
+            # Argument of periastron (rad)
+            # Default: uniform [0, 2π]
+            cube[8] = self.priors["aop"].draw_samples(1)
 
-            # Angles: uniform [0, 2π)
-            cube[8] = 2.0 * np.pi * cube[8]  # argument of periastron
+            # Position angle of ascending node (rad)
+            # Default: uniform [0, 2π]
+            cube[9] = self.priors["pan"].draw_samples(1)
 
-            # Angles: uniform [0, 2π)
-            cube[9] = 2.0 * np.pi * cube[9]  # longitude of ascending node
+            # Epoch of periastron
+            # Default: uniform [0, 1]
+            cube[10] = self.priors["tau"].draw_samples(1)
 
-            # Epoch of periastron: uniform between T0_min and T0_max
-            cube[10] = R["tau_min"] + cube[10] * (R["tau_max"] - R["tau_min"])
+            # Primary mass (Msun)
+            # Default: normal(primary_mass[0], primary_mass[1])
+            cube[11] = self.priors["m1"].draw_samples(1)
 
-            # System mass
-            cube[11] = R["mtot_min"] + cube[11] * (R["mtot_max"] - R["mtot_min"])
+            # Secondary mass (Msun)
+            # Default: uniform(0, 1) with m2 < m1
+            m2_prior = UniformPrior(self.m2_min, cube[11])
+            cube[12] = m2_prior.draw_samples(1)
 
             return cube
 
         def log_likelihood(params, n_dim: int, n_param: int):
             """
-            Log-likelihood function.
+            Log-likelihood function
             """
 
-            res = self.data_table["centroid_pos_al"] - binary_model.calc_model(params)
+            bin_model = binary_model.calc_model(params)
+            res = self.data_table["centroid_pos_al"] - bin_model
             var = self.data_table["centroid_pos_error_al"] ** 2
 
             return -0.5 * np.sum(res**2 / var)
 
+        # Run sampling with MultiNest
         pymultinest.run(
             log_likelihood,
             prior_transform,
@@ -229,9 +226,8 @@ class NestedSampler(ExoGaia):
             verbose=False,
         )
 
-        # Get a dictionary with the ln(Z) and its errors, the
-        # individual modes and their parameters quantiles of
-        # the parameter posteriors
+        # Get a dictionary with ln(Z), the individual modes and
+        # the parameters quantiles of the parameter posteriors
         sampling_stats = analyzer.get_stats()
 
         # Posterior samples
@@ -262,6 +258,7 @@ class NestedSampler(ExoGaia):
                 "ln_z": (self.ln_z, self.ln_z_error),
                 "data_table": self.data_table,
                 "primary_mass": self.primary_mass,
+                "epoch_astrometry": self.epoch_astrometry,
             }
 
             with open(pickle_file, "wb") as open_file:

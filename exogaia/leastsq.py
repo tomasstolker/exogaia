@@ -66,7 +66,7 @@ class LeastSquares(ExoGaia):
         # Number of data points
         n_obs = len(obs_pos)
 
-        # Number of degrees of freedomg
+        # Number of degrees of freedom
         n_dof = n_obs - n_param
 
         # Reduced chi^2
@@ -142,7 +142,7 @@ class LeastSquares(ExoGaia):
                 mec="black",
             )
             plt.xlabel("Time (yr)")
-            plt.ylabel("Residual")
+            plt.ylabel("Residuals (mas)")
             plt.savefig(plot_residuals)
 
         return best_model, best_param, param_sig
@@ -212,7 +212,7 @@ class LeastSquares(ExoGaia):
                 mec="black",
             )
             plt.xlabel("Time (yr)")
-            plt.ylabel("Residual")
+            plt.ylabel("Residuals (mas)")
             plt.savefig(plot_residuals)
 
         return best_model, best_param, param_sig
@@ -294,7 +294,7 @@ class LeastSquares(ExoGaia):
                 mec="black",
             )
             plt.xlabel("Time (yr)")
-            plt.ylabel("Residual")
+            plt.ylabel("Residuals (mas)")
             plt.savefig(plot_residuals)
 
         return best_model, best_param, param_sig

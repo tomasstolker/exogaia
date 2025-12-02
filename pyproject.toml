@@ -27,6 +27,7 @@ dependencies = [
     "pooch",
     "pymultinest",
     "scipy",
+    "tqdm",
     "typeguard",
 ]
 dynamic = ["version"]
@@ -38,7 +39,7 @@ docs = [
     "pandoc",
     "sphinx",
     "sphinx-automodapi",
-    "sphinx_book_theme",
+    "sphinx-readable-theme",
 ]
 test = [
     "black",

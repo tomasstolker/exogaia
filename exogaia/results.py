@@ -41,6 +41,7 @@ class FitResults(ExoGaia):
         self.ln_z = pickle_data["ln_z"]
         self.data_table = pickle_data["data_table"]
         # self.primary_mass = pickle_data["primary_mass"]
+        self.epoch_astrometry = pickle_data["epoch_astrometry"]
         self.primary_mass = (1.0, 0.1)
 
         # Convert inc, aop, pan from rad to deg
@@ -86,9 +87,9 @@ class FitResults(ExoGaia):
         params = [
             r"$\alpha \cos\delta$",
             r"$\delta$",
+            r"$\varpi$",
             r"$\mu_\alpha \cos\delta$",
             r"$\mu_\delta$",
-            r"$\varpi$",
             r"$a$",
             r"$e$",
             r"$i$",
@@ -101,9 +102,9 @@ class FitResults(ExoGaia):
         units = [
             "(mas)",
             "(mas",
-            "(mas/yr)",
-            "(mas/yr)",
             "(mas)",
+            "(mas/yr)",
+            "(mas/yr)",
             "(au)",
             None,
             "(deg)",
@@ -171,12 +172,13 @@ class FitResults(ExoGaia):
         obs_pos = self.data_table["centroid_pos_al"]
         obs_err = self.data_table["centroid_pos_error_al"]
 
-        binary_model = BinaryModel(
-            data_table=self.data_table, primary_mass=self.primary_mass
-        )
+        # Best sample
+        # best_params = np.median(self.samples, axis=0)
+        max_idx = np.argmax(self.ln_like)
+        best_params = self.samples[max_idx, :]
 
-        best_param = np.median(self.samples, axis=0)
-        best_model = binary_model.calc_model(best_param)
+        binary_model = BinaryModel(epoch_astrometry=self.epoch_astrometry)
+        best_model = binary_model.calc_model(best_params)
 
         fig = plt.figure(figsize=(6, 3))
         plt.errorbar(
@@ -193,9 +195,86 @@ class FitResults(ExoGaia):
             mec="black",
         )
         plt.xlabel("Time (yr)")
-        plt.ylabel("Residual")
+        plt.ylabel("Residuals (mas)")
 
         if output_file is not None:
             fig.savefig(output_file)
+
+        return fig
+
+    def plot_orbit(self, output_file: str = None):
+        """
+        Orbit plot
+        """
+
+        # Best sample
+        # best_params = np.median(self.samples, axis=0)
+        max_idx = np.argmax(self.ln_like)
+        best_params = self.samples[max_idx, :]
+        best_params = [
+            0.0,
+            0.0,
+            10.0,
+            20.0,
+            -20.0,
+            1.0,
+            0.0,
+            np.radians(0.0),
+            np.radians(0.0),
+            np.radians(0.0),
+            0.0,
+            1.1,
+        ]
+
+        period = np.sqrt(best_params[5] ** 3 / best_params[11]) * 365.25
+        obs_time = np.linspace(0.0, period, 1000)
+
+        bin_model = BinaryModel(epoch_astrometry=self.epoch_astrometry, verbose=False)
+        delta_ra_full, delta_dec_full = bin_model.calc_orbit(
+            best_params, obs_time=obs_time
+        )
+        delta_ra, delta_dec = bin_model.calc_orbit(best_params, obs_time=None)
+        residuals = bin_model.calc_residuals(best_params)
+
+        self.print_section("Plot orbit")
+
+        res_ra, res_dec = (
+            np.sin(self.data_table["scan_pos_angle"]) * residuals,
+            np.cos(self.data_table["scan_pos_angle"]) * residuals,
+        )
+
+        fig = plt.figure(figsize=(4, 4))
+
+        plt.plot(delta_ra + res_ra, delta_dec + res_dec, "o", ms=2.0, color="tab:gray")
+
+        plt.plot(
+            delta_ra_full,
+            delta_dec_full,
+            ls="-",
+            lw=1.0,
+            marker="none",
+            color="black",
+        )
+
+        for i in range(len(residuals)):
+            x1 = delta_ra[i] + np.sin(self.data_table["scan_pos_angle"])[i] * (
+                residuals[i] + self.data_table["centroid_pos_error_al"][i]
+            )
+            x2 = delta_ra[i] + np.sin(self.data_table["scan_pos_angle"])[i] * (
+                residuals[i] - self.data_table["centroid_pos_error_al"][i]
+            )
+            y1 = delta_dec[i] + np.cos(self.data_table["scan_pos_angle"])[i] * (
+                residuals[i] + self.data_table["centroid_pos_error_al"][i]
+            )
+            y2 = delta_dec[i] + np.cos(self.data_table["scan_pos_angle"])[i] * (
+                residuals[i] - self.data_table["centroid_pos_error_al"][i]
+            )
+            plt.plot([x1, x2], [y1, y2], "-", lw=1, color="tab:gray")
+
+        plt.xlabel(r"$\Delta$RA (mas)")
+        plt.ylabel(r"$\Delta$Dec (mas)")
+
+        if output_file is not None:
+            plt.savefig(output_file)
 
         return fig
