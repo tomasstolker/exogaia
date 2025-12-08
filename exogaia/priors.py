@@ -12,11 +12,15 @@ class Prior(ABC):
 
     @abstractmethod
     def draw_samples(self, n_samples):
-        pass
+        """
+        Abstract method for drawing prior samples.
+        """
 
     @abstractmethod
     def transform_samples(self, unit_samples):
-        pass
+        """
+        Abstract method for transforming unit samples.
+        """
 
 
 class UniformPrior(Prior):
@@ -24,6 +28,9 @@ class UniformPrior(Prior):
         self.min_val = min_val
         self.max_val = max_val
         self.rng = np.random.default_rng()
+
+    def __repr__(self):
+        return f"Uniform: [{self.min_val:.2f}, {self.max_val:.2f}]"
 
     def draw_samples(self, n_samples):
         samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
@@ -36,9 +43,12 @@ class UniformPrior(Prior):
 
 class LogUniformPrior(Prior):
     def __init__(self, min_val, max_val):
-        self.log_min = np.log(min_val)
-        self.log_max = np.log(max_val)
+        self.log_min = np.log10(min_val)
+        self.log_max = np.log10(max_val)
         self.rng = np.random.default_rng()
+
+    def __repr__(self):
+        return f"LogUniform: [{self.log_min:.2f}, {self.log_max:.2f}]"
 
     def draw_samples(self, n_samples):
         samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
@@ -55,6 +65,9 @@ class NormalPrior(Prior):
         self.sigma = sigma
         self.truncate_zero = truncate_zero
         self.rng = np.random.default_rng()
+
+    def __repr__(self):
+        return f"NormalPrior: [{self.mu:.2f}, {self.sigma:.2f}]"
 
     def draw_samples(self, n_samples):
         samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
@@ -83,6 +96,9 @@ class NormalPrior(Prior):
 class SinPrior(Prior):
     def __init__(self):
         self.rng = np.random.default_rng()
+
+    def __repr__(self):
+        return "SinPrior: arccos(1 - 2u)"
 
     def draw_samples(self, n_samples):
         samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)

@@ -15,11 +15,12 @@ from astropy import units as u
 from astropy.table import Table
 from astropy.time import Time
 
-from exogaia.core import ExoGaia
-from exogaia.model import BinaryModel
+from astroquery.gaia import Gaia
 
-# from astroquery.gaia import Gaia
-# Gaia.ROW_LIMIT = -1
+from exogaia.core import ExoGaia
+from exogaia.models import BinaryModel
+
+Gaia.ROW_LIMIT = -1
 
 
 class EpochAstrometry(ExoGaia):
@@ -45,20 +46,20 @@ class EpochAstrometry(ExoGaia):
         self.primary_mass = primary_mass
         self.data_table = None
 
+        # Start of the Gaia mission
+        self.time_start = Time("2014-07-25 10:30:00", scale="utc")
+
         if self.gaia_release == "DR3":
             self.ref_epoch = Time("2016.0", format="jyear", scale="tcb")
+            self.time_end = Time("2017-05-28 08:44:00", scale="utc")
 
         elif self.gaia_release == "DR4":
             self.ref_epoch = Time("2017.5", format="jyear", scale="tcb")
+            self.time_end = Time("2020-01-20 22:00:00", scale="utc")
 
         elif self.gaia_release == "DR5":
             self.ref_epoch = Time("2020.0", format="jyear", scale="tcb")
-
-        else:
-            raise ValueError(
-                f"The 'gaia_release={self.gaia_release}' is not "
-                "supported. Please select 'DR3', 'DR4', or 'DR5'."
-            )
+            self.time_end = Time("2025-01-15 00:00:00", scale="utc")
 
         print(f"Gaia release: {self.gaia_release}")
         print(f"Reference epoch: {self.ref_epoch}")
@@ -116,6 +117,7 @@ class EpochAstrometry(ExoGaia):
         inc,
         aop,
         phot_g_mean_mag,
+        sigma_per_ccd: Optional[float] = None,
         csv_out: Optional[str] = None,
     ):
         """
@@ -123,6 +125,20 @@ class EpochAstrometry(ExoGaia):
         for a given Gaia data release. The function and
         ``healpix`` data has been adopted from ``gaiamock``
         by El-Badry et al. (2025)
+
+        MIT License
+
+        Copyright (c) 2024 kareemelbadry
+
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
 
         Parameters
         ----------
@@ -157,22 +173,12 @@ class EpochAstrometry(ExoGaia):
             "little omega" in radians
         phot_g_mean_mag : float
             G-band magnitude
+        sigma_per_ccd : float, None
+            The AL uncertainty per CCD (mas). Setting the argument
+            to ``None`` will adopt the G magnitude dependent
+            uncertainty from Holl et al. (2023).
         csv_out : str
             Output file
-
-        MIT License
-
-        Copyright (c) 2024 kareemelbadry
-
-        Permission is hereby granted, free of charge, to any person obtaining a copy
-        of this software and associated documentation files (the "Software"), to deal
-        in the Software without restriction, including without limitation the rights
-        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-        copies of the Software, and to permit persons to whom the Software is
-        furnished to do so, subject to the following conditions:
-
-        The above copyright notice and this permission notice shall be included in all
-        copies or substantial portions of the Software.
         """
 
         self.print_section("Simulate data")
@@ -201,9 +207,8 @@ class EpochAstrometry(ExoGaia):
         # Find the scan times and angles for a given sky position
         # by searching for the nearest position in a set of pre-
         # downloaded 49152 sky positions (healpix level 64)
-        healp_num = healpy.ang2pix(
-            64, np.radians(90.0 - np.array(dec)), np.radians(np.array(ra)), nest=False
-        )
+
+        healp_num = healpy.ang2pix(64, ra, dec, lonlat=True)
 
         with h5py.File(healpix_file, "r") as hdf5_file:
             healp_table = Table(hdf5_file[f"healpix_64_{healp_num}"][:])
@@ -229,28 +234,9 @@ class EpochAstrometry(ExoGaia):
         # aligned. The time coordinate for Gaia DR4 results is the
         # barycentric coordinate time (TCB).
 
-        t_start = Time("2014-07-25 10:30:00", scale="utc")
-
-        if self.gaia_release == "DR3":
-            t_end = Time("2017-05-28 08:44:00", scale="utc")
-            time_select = (obs_time_full > t_start.tcb.jd) & (
-                obs_time_full < t_end.tcb.jd
-            )
-
-        elif self.gaia_release == "DR4":
-            t_end = Time("2020-01-20 22:00:00", scale="utc")
-            time_select = (obs_time_full > t_start.tcb.jd) & (
-                obs_time_full < t_end.tcb.jd
-            )
-
-        elif self.gaia_release == "DR5":
-            time_select = np.ones(len(healp_table), dtype=bool)
-
-        else:
-            raise ValueError(
-                f"The 'gaia_release={self.gaia_release}' is not "
-                "supported. Please select 'DR3', 'DR4', or 'DR5'."
-            )
+        time_select = (obs_time_full > self.time_start.tcb.jd) & (
+            obs_time_full < self.time_end.tcb.jd
+        )
 
         table_select = healp_table[time_select]
 
@@ -269,23 +255,24 @@ class EpochAstrometry(ExoGaia):
         t_ast_day = obs_time_tcb - self.ref_epoch.jd
         t_ast_yr = t_ast_day / 365.25
 
-        # Uncertainty per CCD -- so not per FoV transit.
-        # This gives the uncertainty *per CCD* (not per FOV transit),
-        # taken from Fig. 3 in https://arxiv.org/abs/2206.05439
-        # This is the "EDR3 adjusted" line from that figure, which
-        # is already inflated compared to the formal uncertainties.
+        # Median CCD AL-scan abscissa uncertainty persource.
+        # Digitized from Fig. 3 in Holl et al. (2023)
 
         n_ccd_avg = 8
 
-        g_vals = [4, 5, 6, 7, 8.2, 8.4, 10, 11, 12]
-        g_vals += [13, 14, 15, 16, 17, 18, 19, 20]
+        if sigma_per_ccd is None:
+            file_folder = Path(__file__).resolve().parent.parent
+            data_file = file_folder / "data/holl2023_sigma.csv"
 
-        sigma_eta = [0.4, 0.35, 0.15, 0.17, 0.23, 0.13]
-        sigma_eta += [0.13, 0.135, 0.125, 0.13, 0.15, 0.23]
-        sigma_eta += [0.36, 0.63, 1.05, 2.05, 4.1]
+            df = pd.read_csv(data_file)
 
-        sigma_per_ccd = np.interp(phot_g_mean_mag, g_vals, sigma_eta)
+            sigma_per_ccd = np.interp(
+                phot_g_mean_mag, df["Gaia G mag"], df["CCD AL scan uncertainty (mas)"]
+            )
+
         sigma_per_transit = sigma_per_ccd / np.sqrt(n_ccd_avg)
+        print(f"AL scan uncertainty (per CCD) = {sigma_per_ccd:.2f} mas")
+        print(f"AL scan uncertainty (per transit) = {sigma_per_transit:.2f} mas")
 
         sim_astrom = {
             "obs_time_tcb": t_ast_yr + self.ref_epoch.jyear,
@@ -327,3 +314,130 @@ class EpochAstrometry(ExoGaia):
 
         if csv_out is not None:
             self.data_table.to_csv(csv_out, index=False)
+
+    def get_nss_tables(self):
+        """
+        Parameters
+        ----------
+        data_file : str
+            Data file with the Gaia epoch astrometry.
+        """
+
+        self.print_section("Retrieve Gaia non-single star tables")
+
+        # List all Gaia tables
+        # for table_item in Gaia.load_tables(only_names=True):
+        #     print (table_item.get_qualified_name())
+
+        # Gaia DR3 NSS tables
+        # gaiadr3.nss_acceleration_astro
+        # gaiadr3.nss_non_linear_spectro
+        # gaiadr3.nss_two_body_orbit
+        # gaiadr3.nss_vim_fl
+
+        if self.gaia_release in ["DR4", "DR5"]:
+            raise ValueError(
+                "The get_nss_table() only supports Gaia DR3. "
+                "Please set the 'gaia_release' argument to 'DR3'."
+            )
+
+        for table_item in ["nss_acceleration_astro", "nss_two_body_orbit"]:
+            # Query Gaia NSS tables
+
+            gaia_query = f"""
+            SELECT *
+            FROM gaia{self.gaia_release.lower()}.{table_item}
+            """
+
+            # Launch the Gaia job and get the results
+
+            gaia_job = Gaia.launch_job_async(
+                gaia_query, dump_to_file=False, verbose=False
+            )
+            gaia_result = gaia_job.get_results()
+
+            gaia_result.write(
+                f"gaia{self.gaia_release}_{table_item}.ecsv",
+                format="ascii.ecsv",
+                overwrite=True,
+            )
+
+    def query_source(self, source_id=None):
+        """
+        Parameters
+        ----------
+        data_file : str
+            Data file with the Gaia epoch astrometry.
+        """
+
+        self.print_section(f"Querying source in GAIA {self.gaia_release}")
+
+        if self.gaia_release in ["DR4", "DR5"]:
+            raise ValueError("TODO")
+
+        print(f"Gaia release: {self.gaia_release}")
+        print(f"Source ID: {source_id}")
+
+        for table_item in ["nss_acceleration_astro", "nss_two_body_orbit"]:
+            print(f"\nTable: gaia{self.gaia_release.lower()}.{table_item}")
+
+            # Query Gaia source ID in NSS tables for selected Gaia source ID
+
+            gaia_query = f"""
+            SELECT *
+            FROM gaia{self.gaia_release.lower()}.{table_item}
+            WHERE source_id = {source_id}
+            """
+
+            # Launch the Gaia job and get the results
+
+            gaia_job = Gaia.launch_job_async(
+                gaia_query, dump_to_file=False, verbose=False
+            )
+            gaia_result = gaia_job.get_results()
+
+            if len(gaia_result) > 0:
+                print("\nTable parameters:")
+                for param_item in gaia_result[0].columns:
+                    print(f"   - {param_item} = {gaia_result[0][param_item]}")
+
+            else:
+                print(f"\nSource not found in {table_item}")
+
+    def gaia_bh3(self):
+        """
+        Parameters
+        ----------
+        data_file : str
+            Data file with the Gaia epoch astrometry.
+        """
+
+        self.print_section("Gaia BH3 epoch data")
+
+        file_folder = Path(__file__).resolve().parent.parent
+        data_file = file_folder / "data/gaiabh3_epochast.dat"
+
+        if self.gaia_release == "DR3":
+            self.ref_epoch = Time("2016.0", format="jyear", scale="tcb")
+            self.time_end = Time("2017-05-28 08:44:00", scale="utc")
+
+        print(f"Gaia release: {self.gaia_release}")
+        print(f"Reference epoch: {self.ref_epoch}")
+        print("Source ID: 4318465066420528000")
+
+        self.data_table = pd.read_csv(
+            data_file, sep=r"\s+", header="infer", comment="#", skip_blank_lines=True
+        )
+
+        if "relative_time_year" not in self.data_table:
+            self.data_table["relative_time_year"] = (
+                self.data_table["obs_time_tcb"] - self.ref_epoch.jyear
+            )
+
+        if "relative_time_day" not in self.data_table:
+            self.data_table["relative_time_year"] = self.data_table[
+                "relative_time_year"
+            ] * u.year.to(u.day)
+
+        print(f"\nData file: {data_file}")
+        print(f"Data shape: {self.data_table.shape}")

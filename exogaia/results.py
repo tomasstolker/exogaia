@@ -14,7 +14,7 @@ from scipy.stats import norm
 from typeguard import typechecked
 
 from exogaia.core import ExoGaia
-from exogaia.model import BinaryModel
+from exogaia.models import BinaryModel
 
 
 class FitResults(ExoGaia):
@@ -81,7 +81,8 @@ class FitResults(ExoGaia):
             r"$\omega$",
             r"$\Omega$",
             r"$t_\mathrm{p}$",
-            r"$M_\mathrm{tot}$",
+            r"$M_1$",
+            r"$M_2$",
         ]
 
         params = [
@@ -96,7 +97,8 @@ class FitResults(ExoGaia):
             r"$\omega$",
             r"$\Omega$",
             r"$t_\mathrm{p}$",
-            r"$M_\mathrm{T}$",
+            r"$M_1$",
+            r"$M_2$",
         ]
 
         units = [
@@ -112,6 +114,7 @@ class FitResults(ExoGaia):
             "(deg)",
             "(days)",
             r"($M_\odot$)",
+            r"($M_\odot$)",
         ]
 
         titles = []
@@ -120,9 +123,9 @@ class FitResults(ExoGaia):
             q_minus, q_plus = q_50 - q_16, q_84 - q_50
 
             if i in [0, 1, 2, 3, 4]:
-                fmt = "{{0:{0}}}".format(".2f").format
+                fmt = "{0:.2f}".format
             else:
-                fmt = "{{0:{0}}}".format(".1f").format
+                fmt = "{0:.1f}".format
 
             best_fit = r"${{{0}}}_{{-{1}}}^{{+{2}}}$"
             best_fit = best_fit.format(fmt(q_50), fmt(q_minus), fmt(q_plus))
@@ -207,6 +210,10 @@ class FitResults(ExoGaia):
         Orbit plot
         """
 
+        # Epoch astrometry data
+        obs_pos = self.data_table["centroid_pos_error_al"]
+        scan_ang = self.data_table["scan_pos_angle"]
+
         # Best sample
         # best_params = np.median(self.samples, axis=0)
         max_idx = np.argmax(self.ln_like)
@@ -239,8 +246,8 @@ class FitResults(ExoGaia):
         self.print_section("Plot orbit")
 
         res_ra, res_dec = (
-            np.sin(self.data_table["scan_pos_angle"]) * residuals,
-            np.cos(self.data_table["scan_pos_angle"]) * residuals,
+            np.sin(scan_ang) * residuals,
+            np.cos(scan_ang) * residuals,
         )
 
         fig = plt.figure(figsize=(4, 4))
@@ -256,19 +263,11 @@ class FitResults(ExoGaia):
             color="black",
         )
 
-        for i in range(len(residuals)):
-            x1 = delta_ra[i] + np.sin(self.data_table["scan_pos_angle"])[i] * (
-                residuals[i] + self.data_table["centroid_pos_error_al"][i]
-            )
-            x2 = delta_ra[i] + np.sin(self.data_table["scan_pos_angle"])[i] * (
-                residuals[i] - self.data_table["centroid_pos_error_al"][i]
-            )
-            y1 = delta_dec[i] + np.cos(self.data_table["scan_pos_angle"])[i] * (
-                residuals[i] + self.data_table["centroid_pos_error_al"][i]
-            )
-            y2 = delta_dec[i] + np.cos(self.data_table["scan_pos_angle"])[i] * (
-                residuals[i] - self.data_table["centroid_pos_error_al"][i]
-            )
+        for i, res_item in enumerate(residuals):
+            x1 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item + obs_pos[i])
+            x2 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item - obs_pos[i])
+            y1 = delta_dec[i] + np.cos(scan_ang[i]) * (res_item + obs_pos[i])
+            y2 = delta_dec[i] + np.cos(scan_ang[i]) * (res_item - obs_pos[i])
             plt.plot([x1, x2], [y1, y2], "-", lw=1, color="tab:gray")
 
         plt.xlabel(r"$\Delta$RA (mas)")

@@ -25,7 +25,7 @@ except:
 
 from exogaia.core import ExoGaia
 from exogaia.data import EpochAstrometry
-from exogaia.model import BinaryModel
+from exogaia.models import BinaryModel
 from exogaia.priors import LogUniformPrior, NormalPrior, SinPrior, UniformPrior
 
 
@@ -54,7 +54,7 @@ class NestedSampler(ExoGaia):
         self.priors["parallax"] = UniformPrior(0.0, 100.0)
         self.priors["pmra"] = UniformPrior(-50.0, 50.0)
         self.priors["pmdec"] = UniformPrior(-50.0, 50.0)
-        self.priors["sma"] = LogUniformPrior(1e-3, 2.0)
+        self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
         self.priors["ecc"] = UniformPrior(0.0, 1.0)
         self.priors["inc"] = SinPrior()
         self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
@@ -83,7 +83,14 @@ class NestedSampler(ExoGaia):
         self.print_section("Orbit fit with MultiNest")
 
         self.output_folder = output_folder
-        self.m2_min = self.priors["m2"].min_val
+        m2_min = self.priors["m2"].min_val
+
+        # Priors
+
+        print("Priors:")
+        for param_name, param_prior in self.priors.items():
+            print(f"   - {param_name} = {param_prior}")
+        print()
 
         # Create empty dictionary if needed
 
@@ -143,7 +150,7 @@ class NestedSampler(ExoGaia):
             epoch_astrometry=self.epoch_astrometry, verbose=False
         )
 
-        def prior_transform(cube, n_dim: int, n_param: int):
+        def prior_transform(cube, n_dim: int, n_par: int):
             """
             Prior transform
             """
@@ -192,12 +199,12 @@ class NestedSampler(ExoGaia):
 
             # Secondary mass (Msun)
             # Default: uniform(0, 1) with m2 < m1
-            m2_prior = UniformPrior(self.m2_min, cube[11])
+            m2_prior = UniformPrior(m2_min, cube[11])
             cube[12] = m2_prior.draw_samples(1)
 
             return cube
 
-        def log_likelihood(params, n_dim: int, n_param: int):
+        def log_likelihood(params, n_dim: int, n_par: int):
             """
             Log-likelihood function
             """
