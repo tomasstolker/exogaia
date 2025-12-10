@@ -40,12 +40,7 @@ class FitResults(ExoGaia):
         self.ln_like = pickle_data["ln_like"]
         self.ln_z = pickle_data["ln_z"]
         self.data_table = pickle_data["data_table"]
-        # self.primary_mass = pickle_data["primary_mass"]
         self.epoch_astrometry = pickle_data["epoch_astrometry"]
-        self.primary_mass = (1.0, 0.1)
-
-        # Convert inc, aop, pan from rad to deg
-        self.samples[:, 7:10] = np.degrees(self.samples[:, 7:10])
 
     def plot_posterior(self, truths: List[float] = None, output_file: str = None):
         """
@@ -54,7 +49,13 @@ class FitResults(ExoGaia):
 
         self.print_section("Plot posterior")
 
-        n_params = self.samples.shape[1]
+        post_samples = np.copy(self.samples)
+        post_samples[:, 5] = np.log10(post_samples[:, 5])
+
+        # Convert inc, aop, pan from rad to deg
+        post_samples[:, 7:10] = np.degrees(post_samples[:, 7:10])
+
+        n_params = post_samples.shape[1]
 
         # Quantiles for the 1D distributions (-1, 1 sigma)
         quantiles = [norm.cdf(n_sigma) for n_sigma in [-1, 1]]
@@ -102,8 +103,8 @@ class FitResults(ExoGaia):
         ]
 
         units = [
-            "(mas)",
-            "(mas",
+            "(deg)",
+            "(deg)",
             "(mas)",
             "(mas/yr)",
             "(mas/yr)",
@@ -119,7 +120,7 @@ class FitResults(ExoGaia):
 
         titles = []
         for i in range(n_params):
-            q_16, q_50, q_84 = np.percentile(self.samples[:, i], [16.0, 50.0, 84])
+            q_16, q_50, q_84 = np.percentile(post_samples[:, i], [16.0, 50.0, 84])
             q_minus, q_plus = q_50 - q_16, q_84 - q_50
 
             if i in [0, 1, 2, 3, 4]:
@@ -136,7 +137,7 @@ class FitResults(ExoGaia):
                 titles.append(f"{params[i]} = {best_fit} {units[i]}")
 
         fig = corner(
-            self.samples,
+            post_samples,
             truths=truths,
             truth_color="cornflowerblue",
             labels=labels,
@@ -184,6 +185,7 @@ class FitResults(ExoGaia):
         best_model = binary_model.calc_model(best_params)
 
         fig = plt.figure(figsize=(6, 3))
+
         plt.errorbar(
             obs_yr,
             obs_pos - best_model,
@@ -197,6 +199,7 @@ class FitResults(ExoGaia):
             ecolor="black",
             mec="black",
         )
+
         plt.xlabel("Time (yr)")
         plt.ylabel("Residuals (mas)")
 
@@ -218,28 +221,16 @@ class FitResults(ExoGaia):
         # best_params = np.median(self.samples, axis=0)
         max_idx = np.argmax(self.ln_like)
         best_params = self.samples[max_idx, :]
-        best_params = [
-            0.0,
-            0.0,
-            10.0,
-            20.0,
-            -20.0,
-            1.0,
-            0.0,
-            np.radians(0.0),
-            np.radians(0.0),
-            np.radians(0.0),
-            0.0,
-            1.1,
-        ]
 
         period = np.sqrt(best_params[5] ** 3 / best_params[11]) * 365.25
         obs_time = np.linspace(0.0, period, 1000)
 
         bin_model = BinaryModel(epoch_astrometry=self.epoch_astrometry, verbose=False)
+
         delta_ra_full, delta_dec_full = bin_model.calc_orbit(
             best_params, obs_time=obs_time
         )
+
         delta_ra, delta_dec = bin_model.calc_orbit(best_params, obs_time=None)
         residuals = bin_model.calc_residuals(best_params)
 
@@ -251,8 +242,7 @@ class FitResults(ExoGaia):
         )
 
         fig = plt.figure(figsize=(4, 4))
-
-        plt.plot(delta_ra + res_ra, delta_dec + res_dec, "o", ms=2.0, color="tab:gray")
+        ax = plt.gca()
 
         plt.plot(
             delta_ra_full,
@@ -263,6 +253,8 @@ class FitResults(ExoGaia):
             color="black",
         )
 
+        plt.plot(delta_ra + res_ra, delta_dec + res_dec, "o", ms=2.0, color="tab:gray")
+
         for i, res_item in enumerate(residuals):
             x1 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item + obs_pos[i])
             x2 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item - obs_pos[i])
@@ -272,6 +264,15 @@ class FitResults(ExoGaia):
 
         plt.xlabel(r"$\Delta$RA (mas)")
         plt.ylabel(r"$\Delta$Dec (mas)")
+
+        x_lim = ax.get_xlim()
+        y_lim = ax.get_ylim()
+
+        lim_list = np.array([x_lim[0], x_lim[1], y_lim[0], y_lim[1]])
+        lim_max = np.amax(np.abs(lim_list))
+
+        plt.xlim(lim_max, -lim_max)
+        plt.ylim(-lim_max, lim_max)
 
         if output_file is not None:
             plt.savefig(output_file)

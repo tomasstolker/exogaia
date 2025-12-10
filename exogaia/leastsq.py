@@ -86,11 +86,14 @@ class LeastSquares(ExoGaia):
 
         # Parameter covariances
         param_cov = cho_solve(cho_fac, np.eye(a_matrix.shape[0]))
-        param_sig = infl_fact * np.sqrt(np.diag(param_cov))
+        param_sig = np.sqrt(np.diag(param_cov))
 
-        print(f"Reduced chi^2 = {chi2_red:.2f}")
-        print(f"RUWE = {ruwe:.2f}")
-        print(f"Inflation factor = {infl_fact:.2f}")
+        if infl_fact > 1.0:
+            param_sig *= infl_fact
+
+        print(f"Reduced chi^2 = {chi2_red:.3f}")
+        print(f"RUWE = {ruwe:.3f}")
+        print(f"Inflation factor = {infl_fact:.3f}")
 
         return best_model, best_param, param_sig, ruwe
 
@@ -197,11 +200,11 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"$\varpi$ = {best_param[2]:.2f} $\pm$ {param_sig[2]:.2f} mas/yr"
+                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas/yr"
                 + "\n"
-                rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.2f} $\pm$ {param_sig[3]:.2f} mas/yr"
+                rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
-                rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.2f} $\pm$ {param_sig[4]:.2f} mas/yr"
+                rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
             )
 
             axs[1].errorbar(
@@ -256,7 +259,7 @@ class LeastSquares(ExoGaia):
             axs[1].text(
                 0.03,
                 0.92,
-                f"RUWE = {ruwe:.2f}",
+                f"RUWE = {ruwe:.3f}",
                 ha="left",
                 va="center",
                 transform=axs[1].transAxes,
@@ -265,7 +268,7 @@ class LeastSquares(ExoGaia):
 
             plt.savefig(plot_residuals)
 
-        return best_model, best_param, param_sig
+        return best_model, best_param, param_sig, ruwe
 
     @typechecked
     def accel_7param(self, plot_residuals: Optional[str] = None):
@@ -401,11 +404,11 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"$\varpi$ = {best_param[2]:.2f} $\pm$ {param_sig[2]:.2f} mas/yr"
+                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas/yr"
                 + "\n"
-                rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.2f} $\pm$ {param_sig[3]:.2f} mas/yr"
+                rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
-                rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.2f} $\pm$ {param_sig[4]:.2f} mas/yr"
+                rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
             )
 
             axs[0].invert_xaxis()
@@ -501,10 +504,10 @@ class LeastSquares(ExoGaia):
             )
 
             axs[1].set_title(
-                rf"$\dot{{\mu}}_\mathrm{{RA}}$ = {1e3*best_param[5]:.2f} "
-                rf"$\pm$ {1e3*param_sig[5]:.2f} $\mu$as/yr$^2$" + "\n"
-                rf"$\dot{{\mu}}_\mathrm{{Dec}}$ = {1e3*best_param[6]:.2f} "
-                rf"$\pm$ {1e3*param_sig[6]:.2f} $\mu$as/yr$^2$"
+                rf"$\dot{{\mu}}_\mathrm{{RA}}$ = {1e3*best_param[5]:.3f} "
+                rf"$\pm$ {1e3*param_sig[5]:.3f} $\mu$as/yr$^2$" + "\n"
+                rf"$\dot{{\mu}}_\mathrm{{Dec}}$ = {1e3*best_param[6]:.3f} "
+                rf"$\pm$ {1e3*param_sig[6]:.3f} $\mu$as/yr$^2$"
             )
 
             axs[1].invert_xaxis()
@@ -561,7 +564,7 @@ class LeastSquares(ExoGaia):
             axs[2].text(
                 0.04,
                 0.92,
-                f"RUWE = {ruwe:.2f}",
+                f"RUWE = {ruwe:.3f}",
                 ha="left",
                 va="center",
                 transform=axs[2].transAxes,
@@ -570,7 +573,7 @@ class LeastSquares(ExoGaia):
 
             plt.savefig(plot_residuals)
 
-        return best_model, best_param, param_sig
+        return best_model, best_param, param_sig, ruwe
 
     @typechecked
     def accel_9param(self, plot_residuals: Optional[str] = None):
@@ -713,11 +716,11 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"$\varpi$ = {best_param[2]:.2f} $\pm$ {param_sig[2]:.2f} mas/yr"
+                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas/yr"
                 + "\n"
-                rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.2f} $\pm$ {param_sig[3]:.2f} mas/yr"
+                rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
-                rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.2f} $\pm$ {param_sig[4]:.2f} mas/yr"
+                rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
             )
 
             axs[0].invert_xaxis()
@@ -813,14 +816,14 @@ class LeastSquares(ExoGaia):
             )
 
             axs[1].set_title(
-                rf"$\dot{{\mu}}_\mathrm{{RA}}$ = {1e3*best_param[5]:.2f} "
-                rf"$\pm$ {1e3*param_sig[5]:.2f} $\mu$as/yr$^2$" + "\n"
-                rf"$\dot{{\mu}}_\mathrm{{Dec}}$ = {1e3*best_param[6]:.2f} "
-                rf"$\pm$ {1e3*param_sig[6]:.2f} $\mu$as/yr$^2$" + "\n"
-                rf"$\ddot{{\mu}}_\mathrm{{RA}}$ = {1e3*best_param[7]:.2f} "
-                rf"$\pm$ {1e3*param_sig[7]:.2f} $\mu$as/yr$^3$" + "\n"
-                rf"$\ddot{{\mu}}_\mathrm{{Dec}}$ = {1e3*best_param[8]:.2f} "
-                rf"$\pm$ {1e3*param_sig[8]:.2f} $\mu$as/yr$^3$"
+                rf"$\dot{{\mu}}_\mathrm{{RA}}$ = {1e3*best_param[5]:.3f} "
+                rf"$\pm$ {1e3*param_sig[5]:.3f} $\mu$as/yr$^2$" + "\n"
+                rf"$\dot{{\mu}}_\mathrm{{Dec}}$ = {1e3*best_param[6]:.3f} "
+                rf"$\pm$ {1e3*param_sig[6]:.3f} $\mu$as/yr$^2$" + "\n"
+                rf"$\ddot{{\mu}}_\mathrm{{RA}}$ = {1e3*best_param[7]:.3f} "
+                rf"$\pm$ {1e3*param_sig[7]:.3f} $\mu$as/yr$^3$" + "\n"
+                rf"$\ddot{{\mu}}_\mathrm{{Dec}}$ = {1e3*best_param[8]:.3f} "
+                rf"$\pm$ {1e3*param_sig[8]:.3f} $\mu$as/yr$^3$"
             )
 
             axs[1].invert_xaxis()
@@ -877,7 +880,7 @@ class LeastSquares(ExoGaia):
             axs[2].text(
                 0.04,
                 0.92,
-                f"RUWE = {ruwe:.2f}",
+                f"RUWE = {ruwe:.3f}",
                 ha="left",
                 va="center",
                 transform=axs[2].transAxes,
@@ -886,4 +889,4 @@ class LeastSquares(ExoGaia):
 
             plt.savefig(plot_residuals)
 
-        return best_model, best_param, param_sig
+        return best_model, best_param, param_sig, ruwe

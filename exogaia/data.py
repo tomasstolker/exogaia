@@ -108,14 +108,14 @@ class EpochAstrometry(ExoGaia):
         parallax,
         pmra,
         pmdec,
-        m1,
-        m2,
+        mass_1,
+        mass_2,
         sma,
-        Tp,
         ecc,
-        pan,
         inc,
         aop,
+        pan,
+        tau,
         phot_g_mean_mag,
         sigma_per_ccd: Optional[float] = None,
         csv_out: Optional[str] = None,
@@ -143,42 +143,39 @@ class EpochAstrometry(ExoGaia):
         Parameters
         ----------
         ra : float
-            The coordinates of the source at the reference
-            time (which is different for dr3/dr4/dr5) (deg)
+            RA coordinate (deg) at the reference epoch of the ``gaia_release``.
         dec : float
-            The coordinates of the source at the reference
-            time (which is different for dr3/dr4/dr5) (deg)
+            Dec coordinate (deg) at the reference epoch of the ``gaia_release``.
         parallax : float
-            The true parallax (i.e., 1/d) (mas)
+            Parallax (mas).
         pmra : float
-            The true proper motions in mas/yr
+            Proper motion in RA (mas/yr).
         pmdec : float
-            The true proper motions in mas/yr
-        m1 : float
-            Mass of the primary, in Msun
-        m2 : float
-            Mass of the companion, in Msun
+            Proper motion in Dec (mas/yr).
+        mass_1 : float
+            Primary mass (Msun).
+        mass_2 : float
+            Secondary mass (Msun).
         sma : float
-            Semi-major axis in au
-        Tp : float
-            Periastron time in days
+            Semi-major axis (au)
         ecc : float
-            Eccentricity
-        pan : float
-            "big Omega" in radians
+            Eccentricity.
         inc : float
-            inclination in radians, defined so that
-            0 or pi is face-on, and pi/2 is edge-on.
+            Inclination (rad).
         aop : float
-            "little omega" in radians
+            Argument of periastron (rad).
+        pan : float
+            Position angle of the ascending nodes (rad).
+        tau : float
+            Periastron time, relative to the reference epoch of ``gaia_release``.
         phot_g_mean_mag : float
-            G-band magnitude
+            Gaia G-band magnitude.
         sigma_per_ccd : float, None
             The AL uncertainty per CCD (mas). Setting the argument
             to ``None`` will adopt the G magnitude dependent
             uncertainty from Holl et al. (2023).
         csv_out : str
-            Output file
+            Output CSV file to store the simulated epoch astrometry.
         """
 
         self.print_section("Simulate data")
@@ -271,8 +268,8 @@ class EpochAstrometry(ExoGaia):
             )
 
         sigma_per_transit = sigma_per_ccd / np.sqrt(n_ccd_avg)
-        print(f"AL scan uncertainty (per CCD) = {sigma_per_ccd:.2f} mas")
-        print(f"AL scan uncertainty (per transit) = {sigma_per_transit:.2f} mas")
+        print(f"AL scan uncertainty (per CCD) = {1e3*sigma_per_ccd:.2f} uas")
+        print(f"AL scan uncertainty (per transit) = {1e3*sigma_per_transit:.2f} uas")
 
         sim_astrom = {
             "obs_time_tcb": t_ast_yr + self.ref_epoch.jyear,
@@ -283,6 +280,24 @@ class EpochAstrometry(ExoGaia):
         }
 
         self.data_table = pd.DataFrame(sim_astrom)
+
+        print("\nStellar parameters:")
+        print(f"   - RA (deg) = {ra:.2f}")
+        print(f"   - Dec (deg) = {dec:.2f}")
+        print(f"   - Parallax (mas) = {parallax:.2f}")
+        print(f"   - Proper motion in RA (mas/yr) = {pmra:.2f}")
+        print(f"   - Proper motion in Dec (mas/yr) = {pmdec:.2f}")
+        print(f"   - G-band magnitude (au) = {phot_g_mean_mag:.2f}")
+
+        print("\nOrbit parameters:")
+        print(f"   - Primary mass (Msun) = {mass_1:.2f}")
+        print(f"   - Secondary mass (Msun) = {mass_2:.2f}")
+        print(f"   - Semi-major axis (au) = {sma:.2f}")
+        print(f"   - Eccentricity = {ecc:.2f}")
+        print(f"   - Inclination (deg) = {np.degrees(inc):.2f}")
+        print(f"   - Argument of periastron (deg) = {np.degrees(aop):.2f}")
+        print(f"   - PA of ascending node (deg) = {np.degrees(pan):.2f}")
+        print(f"   - Relative time of periastron = {tau:.2f}")
 
         model_params = [
             ra,
@@ -295,12 +310,12 @@ class EpochAstrometry(ExoGaia):
             inc,
             aop,
             pan,
-            Tp,
-            m1,
-            m2,
+            tau,
+            mass_1,
+            mass_2,
         ]
 
-        bin_model = BinaryModel(self)
+        bin_model = BinaryModel(self, verbose=False)
         cen_pos = bin_model.calc_model(model_params=model_params)
 
         rng = np.random.default_rng()

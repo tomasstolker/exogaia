@@ -60,18 +60,17 @@ class LogUniformPrior(Prior):
 
 
 class NormalPrior(Prior):
-    def __init__(self, mu, sigma, truncate_zero=True):
+    def __init__(self, mu, sigma, truncate_zero=False):
         self.mu = mu
         self.sigma = sigma
         self.truncate_zero = truncate_zero
         self.rng = np.random.default_rng()
 
     def __repr__(self):
-        return f"NormalPrior: [{self.mu:.2f}, {self.sigma:.2f}]"
+        return f"Normal: [{self.mu:.2f}, {self.sigma:.2f}]"
 
     def draw_samples(self, n_samples):
         samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
-
         return self.transform_samples(samples)
 
     def transform_samples(self, unit_samples):
@@ -98,7 +97,7 @@ class SinPrior(Prior):
         self.rng = np.random.default_rng()
 
     def __repr__(self):
-        return "SinPrior: arccos(1 - 2u)"
+        return "Sin: arccos(1 - 2u)"
 
     def draw_samples(self, n_samples):
         samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
@@ -106,3 +105,18 @@ class SinPrior(Prior):
 
     def transform_samples(self, unit_samples):
         return np.arccos(1.0 - 2.0 * unit_samples)
+
+
+class FixedPrior(Prior):
+    def __init__(self, fix_val):
+        self.fix_val = fix_val
+
+    def __repr__(self):
+        return f"Fixed: {self.fix_val:.2f}"
+
+    def draw_samples(self, n_samples):
+
+        return self.fix_val
+
+    def transform_samples(self, unit_samples):
+        """ """

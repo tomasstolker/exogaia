@@ -160,6 +160,9 @@ class BinaryModel(ExoGaia):
         sma, ecc, inc, aop, pan, tau, m1, m2 = model_params[5:13]
         parallax = model_params[2]  # (mas)
 
+        # Add 180 deg to convert from secondary to primary
+        aop += np.pi
+
         period = np.sqrt(sma**3 / (m1 + m2)) * 365.25  # (days)
         t_per = period * tau  # (days)
 
@@ -186,11 +189,11 @@ class BinaryModel(ExoGaia):
         thiele_innes_b = sma1 * (
             np.cos(aop) * np.sin(pan) + np.sin(aop) * np.cos(pan) * np.cos(inc)
         )
-        thiele_innes_f = sma1 * (
-            -np.sin(aop) * np.cos(pan) - np.cos(aop) * np.sin(pan) * np.cos(inc)
+        thiele_innes_f = -sma1 * (
+            np.sin(aop) * np.cos(pan) + np.cos(aop) * np.sin(pan) * np.cos(inc)
         )
-        thiele_innes_g = sma1 * (
-            -np.sin(aop) * np.sin(pan) + np.cos(aop) * np.cos(pan) * np.cos(inc)
+        thiele_innes_g = -sma1 * (
+            np.sin(aop) * np.sin(pan) - np.cos(aop) * np.cos(pan) * np.cos(inc)
         )
 
         # Rotate (x_orb, y_orb) into sky plane (x_sky, y_sky)
@@ -216,12 +219,16 @@ class BinaryModel(ExoGaia):
         if self.verbose:
             self.print_section("Calculate binary model")
 
-            print("Model paramers:")
+            print("Stellar parameters:")
             print(f"   - RA (deg) = {model_params[0]:.2f}")
             print(f"   - Dec (deg) = {model_params[1]:.2f}")
             print(f"   - Parallax (mas) = {model_params[2]:.2f}")
             print(f"   - Proper motion in RA (mas/yr) = {model_params[3]:.2f}")
             print(f"   - Proper motion in Dec (mas/yr) = {model_params[4]:.2f}")
+
+            print("\nOrbit parameters:")
+            print(f"   - Primary mass (Msun) = {model_params[11]:.2f}")
+            print(f"   - Secondary mass (Msun) = {model_params[12]:.2f}")
             print(f"   - Semi-major axis (au) = {model_params[5]:.2f}")
             print(f"   - Eccentricity = {model_params[6]:.2f}")
             print(f"   - Inclination (deg) = {np.degrees(model_params[7]):.2f}")
@@ -231,9 +238,7 @@ class BinaryModel(ExoGaia):
             print(
                 f"   - PA of ascending node (deg) = {np.degrees(model_params[9]):.2f}"
             )
-            print(f"   - Epoch of periastron = {model_params[10]:.2f}")
-            print(f"   - Primary mass (Msun) = {model_params[11]:.2f}")
-            print(f"   - Secondary mass (Msun) = {model_params[12]:.2f}")
+            print(f"   - Relative time of periastron = {model_params[10]:.2f}")
 
         # Design matrix for 5-param linear projection
         design = np.column_stack(
@@ -384,10 +389,8 @@ class BinaryModel(ExoGaia):
         lim_list = np.array([x_lim[0], x_lim[1], y_lim[0], y_lim[1]])
         lim_max = np.amax(np.abs(lim_list))
 
-        plt.xlim(-lim_max, lim_max)
+        plt.xlim(lim_max, -lim_max)
         plt.ylim(-lim_max, lim_max)
-
-        ax.invert_xaxis()
 
         if output_file is not None:
             plt.savefig(output_file)

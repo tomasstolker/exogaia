@@ -12,7 +12,13 @@ import matplotlib as mpl
 from exogaia.data import EpochAstrometry
 from exogaia.leastsq import LeastSquares
 from exogaia.models import BinaryModel
-from exogaia.priors import LogUniformPrior, NormalPrior, SinPrior, UniformPrior
+from exogaia.priors import (
+    FixedPrior,
+    LogUniformPrior,
+    NormalPrior,
+    SinPrior,
+    UniformPrior,
+)
 from exogaia.results import FitResults
 from exogaia.sampler import NestedSampler
 
