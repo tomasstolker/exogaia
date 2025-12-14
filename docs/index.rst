@@ -9,5 +9,6 @@ Documentation for *exogaia*
    :maxdepth: 2
 
    installation
+   tutorial.ipynb
    modules
    about

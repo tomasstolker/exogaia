@@ -1,7 +1,10 @@
 *.pyc
 .DS_Store
-docs/_build
+docs/_build/
 docs/.ipynb_checkpoints/
+docs/multinest/
+docs/*.png
+docs/*.csv
 build/
 dist/
 exogaia.egg-info/

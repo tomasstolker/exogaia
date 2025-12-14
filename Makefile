@@ -45,6 +45,9 @@ clean:
 	rm -rf .pytest_cache/
 	rm -rf docs/_build/
 	rm -rf docs/.ipynb_checkpoints/
+	rm -rf docs/multinest/
+	rm -rf docs/*.png
+	rm -rf docs/*.csv
 	rm -rf build/
 	rm -rf dist/
 	rm -rf exogaia.egg-info/

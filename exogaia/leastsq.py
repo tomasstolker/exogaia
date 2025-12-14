@@ -965,16 +965,18 @@ class LeastSquares(ExoGaia):
         global_sigma = None
         global_orbit = None
 
-        for loga_idx, loga_item in tqdm(enumerate(loga_list)):
-            for ecc_idx, ecc_item in tqdm(enumerate(ecc_list), leave=False):
-                for tau_idx, tau_item in tqdm(enumerate(tau_list), leave=False):
+        pbar = tqdm(total=len(loga_list)*len(ecc_list)*len(tau_list))
+
+        for loga_idx, loga_item in enumerate(loga_list):
+            for ecc_idx, ecc_item in enumerate(ecc_list):
+                for tau_idx, tau_item in enumerate(tau_list):
                     # Semi-major axis (au)
                     sma = 10.0**loga_item
                     # sma = loga_item
 
                     # Primary mass, ignore secondary mass (Msun)
                     m1 = self.primary_mass[0]
-                    m2 = 0.01
+                    m2 = 0.0
 
                     # Orbital period (days)
                     period = np.sqrt(sma**3 / (m1 + m2)) * 365.25
@@ -1021,6 +1023,8 @@ class LeastSquares(ExoGaia):
 
                     # Store tau for contour plot
                     tau_grid[loga_idx, ecc_idx, tau_idx] = tau_item
+
+            pbar.update(len(ecc_list)*len(tau_list))
 
         # fig, ax = plt.subplots(figsize=(7, 3))
         #

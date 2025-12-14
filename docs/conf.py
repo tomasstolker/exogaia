@@ -51,10 +51,6 @@ exclude_patterns = ['_build',
 html_theme = 'readable'
 html_theme_path = [sphinx_readable_theme.get_html_theme_path()]
 
-html_theme_options = {
-    'github_url': 'https://github.com/tomasstolker/exogaia',
-}
-
 html_context = {
     "github_user": "tomasstolker",
     "github_repo": "exogaia",

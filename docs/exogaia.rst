@@ -28,10 +28,10 @@ exogaia.leastsq module
    :undoc-members:
    :show-inheritance:
 
-exogaia.model module
---------------------
+exogaia.models module
+---------------------
 
-.. automodule:: exogaia.model
+.. automodule:: exogaia.models
    :members:
    :undoc-members:
    :show-inheritance:
