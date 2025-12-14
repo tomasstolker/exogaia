@@ -314,7 +314,7 @@ class BinaryModel(ExoGaia):
         return star_model + orbit_model
 
     @typechecked
-    def calc_residuals(self, model_param: List[float]) -> np.ndarray:
+    def calc_residuals(self, model_param: Union[List[float], np.ndarray]) -> np.ndarray:
         """
         Residuals
         """

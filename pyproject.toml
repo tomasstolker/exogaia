@@ -19,6 +19,7 @@ classifiers = [
 dependencies = [
     "astroquery",
     "corner",
+    "dynesty",
     "h5py",
     "healpy",
     "kepler.py",
@@ -28,6 +29,7 @@ dependencies = [
     "pooch",
     "pymultinest",
     "scipy",
+    "schwimmbad",
     "tqdm",
     "typeguard",
 ]

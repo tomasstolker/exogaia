@@ -965,7 +965,7 @@ class LeastSquares(ExoGaia):
         global_sigma = None
         global_orbit = None
 
-        pbar = tqdm(total=len(loga_list)*len(ecc_list)*len(tau_list))
+        pbar = tqdm(total=len(loga_list) * len(ecc_list) * len(tau_list))
 
         for loga_idx, loga_item in enumerate(loga_list):
             for ecc_idx, ecc_item in enumerate(ecc_list):
@@ -1024,7 +1024,7 @@ class LeastSquares(ExoGaia):
                     # Store tau for contour plot
                     tau_grid[loga_idx, ecc_idx, tau_idx] = tau_item
 
-            pbar.update(len(ecc_list)*len(tau_list))
+            pbar.update(len(ecc_list) * len(tau_list))
 
         # fig, ax = plt.subplots(figsize=(7, 3))
         #

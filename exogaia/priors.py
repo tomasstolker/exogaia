@@ -86,7 +86,13 @@ class NormalPrior(Prior):
     """
 
     @typechecked
-    def __init__(self, mu: float, sigma: float, truncate_zero: bool = False, truncate_one: bool = False) -> None:
+    def __init__(
+        self,
+        mu: float,
+        sigma: float,
+        truncate_zero: bool = False,
+        truncate_one: bool = False,
+    ) -> None:
         self.mu = mu
         self.sigma = sigma
         self.truncate_zero = truncate_zero
