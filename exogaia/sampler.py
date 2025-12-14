@@ -74,6 +74,7 @@ class NestedSampler(ExoGaia):
         # Set default priors
 
         least_sq = LeastSquares(epoch_astrometry=self.epoch_astrometry)
+
         _, best_param, _, ruwe = least_sq.singl_5param()
 
         if ruwe > 1.1:

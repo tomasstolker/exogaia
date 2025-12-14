@@ -86,10 +86,11 @@ class NormalPrior(Prior):
     """
 
     @typechecked
-    def __init__(self, mu: float, sigma: float, truncate_zero: bool = False) -> None:
+    def __init__(self, mu: float, sigma: float, truncate_zero: bool = False, truncate_one: bool = False) -> None:
         self.mu = mu
         self.sigma = sigma
         self.truncate_zero = truncate_zero
+        self.truncate_one = truncate_one
         self.rng = np.random.default_rng()
 
     @typechecked
@@ -104,7 +105,11 @@ class NormalPrior(Prior):
     @typechecked
     def transform_samples(self, unit_samples: np.ndarray) -> np.ndarray:
         if self.truncate_zero:
-            lower_bound, upper_bound = 0.0, np.inf
+            if self.truncate_one:
+                lower_bound, upper_bound = 0.0, 1.0
+
+            else:
+                lower_bound, upper_bound = 0.0, np.inf
 
             a = (lower_bound - self.mu) / self.sigma
             b = (upper_bound - self.mu) / self.sigma
