@@ -3,7 +3,7 @@ Module for handling epoch astrometry data.
 """
 
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import h5py
 import healpy
@@ -14,8 +14,8 @@ import pooch
 from astropy import units as u
 from astropy.table import Table
 from astropy.time import Time
-
 from astroquery.gaia import Gaia
+from typeguard import typechecked
 
 from exogaia.core import ExoGaia
 from exogaia.models import BinaryModel
@@ -28,11 +28,12 @@ class EpochAstrometry(ExoGaia):
     Class for handling epoch astrometry data.
     """
 
+    @typechecked
     def __init__(
         self,
         primary_mass: Tuple[float, float] = None,
-        gaia_release="DR3",
-    ):
+        gaia_release: str = "DR3",
+    ) -> None:
         """
         Parameters
         ----------
@@ -73,10 +74,11 @@ class EpochAstrometry(ExoGaia):
 
         return data_str
 
+    @typechecked
     def read_file(
         self,
         data_file: str,
-    ):
+    ) -> None:
         """
         Parameters
         ----------
@@ -101,25 +103,26 @@ class EpochAstrometry(ExoGaia):
                 "relative_time_year"
             ] * u.year.to(u.day)
 
+    @typechecked
     def simulate_data(
         self,
-        ra,
-        dec,
-        parallax,
-        pmra,
-        pmdec,
-        mass_1,
-        mass_2,
-        sma,
-        ecc,
-        inc,
-        aop,
-        pan,
-        tau,
-        phot_g_mean_mag,
+        ra: float,
+        dec: float,
+        parallax: float,
+        pmra: float,
+        pmdec: float,
+        mass_1: float,
+        mass_2: float,
+        sma: float,
+        ecc: float,
+        inc: float,
+        aop: float,
+        pan: float,
+        tau: float,
+        phot_g_mean_mag: float,
         sigma_per_ccd: Optional[float] = None,
         csv_out: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Method to predict the epoch astrometry for a binary
         for a given Gaia data release. The function and
@@ -299,7 +302,7 @@ class EpochAstrometry(ExoGaia):
         print(f"   - PA of ascending node (deg) = {np.degrees(pan):.2f}")
         print(f"   - Relative time of periastron = {tau:.2f}")
 
-        model_params = [
+        model_param = [
             ra,
             dec,
             parallax,
@@ -316,7 +319,7 @@ class EpochAstrometry(ExoGaia):
         ]
 
         bin_model = BinaryModel(self, verbose=False)
-        cen_pos = bin_model.calc_model(model_params=model_params)
+        cen_pos = bin_model.calc_model(model_param=model_param)
 
         rng = np.random.default_rng()
         cen_pos += rng.normal(loc=0.0, scale=sigma_per_transit, size=len(psi))
@@ -330,7 +333,8 @@ class EpochAstrometry(ExoGaia):
         if csv_out is not None:
             self.data_table.to_csv(csv_out, index=False)
 
-    def get_nss_tables(self):
+    @typechecked
+    def get_nss_tables(self) -> None:
         """
         Parameters
         ----------
@@ -377,7 +381,8 @@ class EpochAstrometry(ExoGaia):
                 overwrite=True,
             )
 
-    def query_source(self, source_id=None):
+    @typechecked
+    def query_source(self, source_id: Optional[Union[int, str]] = None) -> None:
         """
         Parameters
         ----------
@@ -419,7 +424,8 @@ class EpochAstrometry(ExoGaia):
             else:
                 print(f"\nSource not found in {table_item}")
 
-    def gaia_bh3(self):
+    @typechecked
+    def gaia_bh3(self) -> None:
         """
         Parameters
         ----------

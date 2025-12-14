@@ -2,14 +2,17 @@
 Module with the ``BinaryModel`` class.
 """
 
-import kepler
+from typing import List, Optional, Tuple, Union
 
+import kepler
 import matplotlib.pyplot as plt
 import numpy as np
 
 from astropy import constants as c
 from astropy.coordinates import get_body_barycentric
+from astropy.coordinates.representation.cartesian import CartesianRepresentation
 from astropy.time import Time
+from matplotlib.figure import Figure
 from typeguard import typechecked
 
 from exogaia.core import ExoGaia
@@ -21,7 +24,9 @@ class StarModel(ExoGaia):
     """
 
     @typechecked
-    def __init__(self, star_param, epoch_astrometry) -> None:
+    def __init__(
+        self, star_param: Union[List[float], np.ndarray], epoch_astrometry
+    ) -> None:
         """
         Returns
         -------
@@ -48,7 +53,8 @@ class StarModel(ExoGaia):
         self.data_table = epoch_astrometry.data_table
         self.ref_epoch = epoch_astrometry.ref_epoch
 
-    def barycentric_position(self, obs_time):
+    @typechecked
+    def barycentric_position(self, obs_time: np.ndarray) -> CartesianRepresentation:
         """
         Returns
         -------
@@ -60,14 +66,17 @@ class StarModel(ExoGaia):
             body="earth", time=Time(obs_time, format="jyear"), ephemeris=None
         )
 
-        # Gaia orbits in Lagrangian L2 of the Sun-Earth system
+        # Gaia orbits in Lagrangian L2 of the Earth-Sun-Moon system
         # https://en.wikipedia.org/wiki/Lagrange_point#L2
 
         mu = c.M_earth.value / (c.M_sun.value + c.M_earth.value)
 
         return bar_pos + bar_pos * (mu / 3) ** (1 / 3)
 
-    def calc_model(self, obs_time=None):
+    @typechecked
+    def calc_model(
+        self, obs_time: Optional[np.ndarray] = None
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Returns
         -------
@@ -138,7 +147,7 @@ class BinaryModel(ExoGaia):
     """
 
     @typechecked
-    def __init__(self, epoch_astrometry, verbose=True) -> None:
+    def __init__(self, epoch_astrometry, verbose: bool = True) -> None:
         """
         Returns
         -------
@@ -149,31 +158,29 @@ class BinaryModel(ExoGaia):
         self.data_table = epoch_astrometry.data_table
         self.verbose = verbose
 
-    def calc_orbit(self, model_params, obs_time=None):
+    @typechecked
+    def solve_kepler(
+        self,
+        period: float,
+        ecc: float,
+        tau: float,
+        obs_time: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Orbit model
+        Solve the Kepler equation
         """
 
         if obs_time is None:
             obs_time = self.data_table["relative_time_day"].to_numpy()
 
-        sma, ecc, inc, aop, pan, tau, m1, m2 = model_params[5:13]
-        parallax = model_params[2]  # (mas)
-
-        # Add 180 deg to convert from secondary to primary
-        aop += np.pi
-
-        period = np.sqrt(sma**3 / (m1 + m2)) * 365.25  # (days)
-        t_per = period * tau  # (days)
+        # Time of periastron (days)
+        t_per = period * tau
 
         # Days relative to periastron
         delta_t = obs_time - t_per
 
         # Mean anomaly at observation epochs
         mean_anom_obs = delta_t * 2.0 * np.pi / period
-
-        # Primary semi-major axis (au)
-        sma1 = sma * m2 / (m1 + m2)
 
         # Solve Kepler's equation
         ecc_anom, _, _ = kepler.kepler(mean_anom_obs, ecc)
@@ -182,18 +189,64 @@ class BinaryModel(ExoGaia):
         x_orb = np.cos(ecc_anom) - ecc
         y_orb = np.sqrt(1.0 - ecc**2) * np.sin(ecc_anom)
 
-        # Thiele-Innes constants
-        thiele_innes_a = sma1 * (
+        return x_orb, y_orb
+
+    @typechecked
+    def thiele_innes(
+        self, sma: float, inc: float, aop: float, pan: float
+    ) -> Tuple[float, float, float, float]:
+        """
+        Thiele-Innes constants
+        """
+
+        thiele_innes_a = sma * (
             np.cos(aop) * np.cos(pan) - np.sin(aop) * np.sin(pan) * np.cos(inc)
         )
-        thiele_innes_b = sma1 * (
+
+        thiele_innes_b = sma * (
             np.cos(aop) * np.sin(pan) + np.sin(aop) * np.cos(pan) * np.cos(inc)
         )
-        thiele_innes_f = -sma1 * (
+
+        thiele_innes_f = -sma * (
             np.sin(aop) * np.cos(pan) + np.cos(aop) * np.sin(pan) * np.cos(inc)
         )
-        thiele_innes_g = -sma1 * (
+
+        thiele_innes_g = -sma * (
             np.sin(aop) * np.sin(pan) - np.cos(aop) * np.cos(pan) * np.cos(inc)
+        )
+
+        return thiele_innes_a, thiele_innes_b, thiele_innes_f, thiele_innes_g
+
+    @typechecked
+    def calc_orbit(
+        self,
+        model_param: Union[List[float], np.ndarray],
+        obs_time: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Orbit model
+        """
+
+        sma, ecc, inc, aop, pan, tau, m1, m2 = model_param[5:13]
+
+        # Parallax (mas)
+        parallax = model_param[2]  # (mas)
+
+        # Orbital period (days)
+        period = np.sqrt(sma**3 / (m1 + m2)) * 365.25
+
+        # Solve the Kepler equation
+        x_orb, y_orb = self.solve_kepler(period, ecc, tau, obs_time)
+
+        # Primary semi-major axis (au)
+        sma1 = sma * m2 / (m1 + m2)
+
+        # Add 180 deg to convert from secondary to primary
+        aop += np.pi
+
+        # Thiele-Innes constants
+        thiele_innes_a, thiele_innes_b, thiele_innes_f, thiele_innes_g = (
+            self.thiele_innes(sma1, inc, aop, pan)
         )
 
         # Rotate (x_orb, y_orb) into sky plane (x_sky, y_sky)
@@ -201,12 +254,13 @@ class BinaryModel(ExoGaia):
         y_sky = thiele_innes_a * x_orb + thiele_innes_f * y_orb
 
         # Scale from au to mas
-        delta_ra = x_sky * parallax  # (mas)
-        delta_dec = y_sky * parallax  # (mas)
+        x_sky *= parallax
+        y_sky *= parallax
 
-        return delta_ra, delta_dec
+        return x_sky, y_sky
 
-    def calc_model(self, model_params):
+    @typechecked
+    def calc_model(self, model_param: Union[List[float], np.ndarray]) -> np.ndarray:
         """
         Binary model
         """
@@ -220,25 +274,23 @@ class BinaryModel(ExoGaia):
             self.print_section("Calculate binary model")
 
             print("Stellar parameters:")
-            print(f"   - RA (deg) = {model_params[0]:.2f}")
-            print(f"   - Dec (deg) = {model_params[1]:.2f}")
-            print(f"   - Parallax (mas) = {model_params[2]:.2f}")
-            print(f"   - Proper motion in RA (mas/yr) = {model_params[3]:.2f}")
-            print(f"   - Proper motion in Dec (mas/yr) = {model_params[4]:.2f}")
+            print(f"   - RA (deg) = {model_param[0]:.2f}")
+            print(f"   - Dec (deg) = {model_param[1]:.2f}")
+            print(f"   - Parallax (mas) = {model_param[2]:.2f}")
+            print(f"   - Proper motion in RA (mas/yr) = {model_param[3]:.2f}")
+            print(f"   - Proper motion in Dec (mas/yr) = {model_param[4]:.2f}")
 
             print("\nOrbit parameters:")
-            print(f"   - Primary mass (Msun) = {model_params[11]:.2f}")
-            print(f"   - Secondary mass (Msun) = {model_params[12]:.2f}")
-            print(f"   - Semi-major axis (au) = {model_params[5]:.2f}")
-            print(f"   - Eccentricity = {model_params[6]:.2f}")
-            print(f"   - Inclination (deg) = {np.degrees(model_params[7]):.2f}")
+            print(f"   - Primary mass (Msun) = {model_param[11]:.2f}")
+            print(f"   - Secondary mass (Msun) = {model_param[12]:.2f}")
+            print(f"   - Semi-major axis (au) = {model_param[5]:.2f}")
+            print(f"   - Eccentricity = {model_param[6]:.2f}")
+            print(f"   - Inclination (deg) = {np.degrees(model_param[7]):.2f}")
             print(
-                f"   - Argument of periastron (deg) = {np.degrees(model_params[8]):.2f}"
+                f"   - Argument of periastron (deg) = {np.degrees(model_param[8]):.2f}"
             )
-            print(
-                f"   - PA of ascending node (deg) = {np.degrees(model_params[9]):.2f}"
-            )
-            print(f"   - Relative time of periastron = {model_params[10]:.2f}")
+            print(f"   - PA of ascending node (deg) = {np.degrees(model_param[9]):.2f}")
+            print(f"   - Relative time of periastron = {model_param[10]:.2f}")
 
         # Design matrix for 5-param linear projection
         design = np.column_stack(
@@ -251,25 +303,24 @@ class BinaryModel(ExoGaia):
             ]
         )
 
-        star_param = model_params[0:5]
+        star_param = model_param[0:5]
         star_model = design @ star_param
 
-        delta_ra, delta_dec = self.calc_orbit(model_params)
+        delta_ra, delta_dec = self.calc_orbit(model_param)
 
         # Calculate 1D projected positions of orbit model
-        sin_phi = np.sin(scan_ang)
-        cos_phi = np.cos(scan_ang)
-        orbit_model = delta_ra * sin_phi + delta_dec * cos_phi
+        orbit_model = delta_ra * np.sin(scan_ang) + delta_dec * np.cos(scan_ang)
 
         return star_model + orbit_model
 
-    def calc_residuals(self, model_params):
+    @typechecked
+    def calc_residuals(self, model_param: List[float]) -> np.ndarray:
         """
         Residuals
         """
 
         # Binary model
-        bin_model = self.calc_model(model_params)
+        bin_model = self.calc_model(model_param)
 
         if self.verbose:
             self.print_section("Calculate residuals")
@@ -285,7 +336,7 @@ class BinaryModel(ExoGaia):
         n_obs = len(obs_pos)
 
         # Number of model parameters
-        n_param = len(model_params)
+        n_param = len(model_param)
 
         # Number of degrees of freedom
         n_dof = n_obs - n_param
@@ -302,7 +353,10 @@ class BinaryModel(ExoGaia):
 
         return residuals
 
-    def plot_orbit(self, model_params, output_file: str = None):
+    @typechecked
+    def plot_orbit(
+        self, model_param: Union[List[float], np.ndarray], output_file: str = None
+    ) -> Figure:
         """
         Orbit plot
         """
@@ -311,13 +365,13 @@ class BinaryModel(ExoGaia):
         obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
         scan_ang = self.data_table["scan_pos_angle"].to_numpy()
 
-        mtot = model_params[11] + model_params[12]
-        period = np.sqrt(model_params[5] ** 3 / mtot) * 365.25
+        mtot = model_param[11] + model_param[12]
+        period = np.sqrt(model_param[5] ** 3 / mtot) * 365.25
         obs_time = np.linspace(0.0, period, 1000)
 
-        delta_ra_full, delta_dec_full = self.calc_orbit(model_params, obs_time=obs_time)
-        delta_ra, delta_dec = self.calc_orbit(model_params, obs_time=None)
-        residuals = self.calc_residuals(model_params)
+        delta_ra_full, delta_dec_full = self.calc_orbit(model_param, obs_time=obs_time)
+        delta_ra, delta_dec = self.calc_orbit(model_param, obs_time=None)
+        residuals = self.calc_residuals(model_param)
 
         if self.verbose:
             self.print_section("Plot orbit")
@@ -392,7 +446,9 @@ class BinaryModel(ExoGaia):
         plt.xlim(lim_max, -lim_max)
         plt.ylim(-lim_max, lim_max)
 
-        if output_file is not None:
+        if output_file is None:
+            plt.show()
+        else:
             plt.savefig(output_file)
 
         return fig

@@ -1,8 +1,13 @@
+"""
+Module for priors.
+"""
+
 from abc import ABC, abstractmethod
 
 import numpy as np
 
 from scipy.stats import norm, truncnorm
+from typeguard import typechecked
 
 
 class Prior(ABC):
@@ -24,56 +29,80 @@ class Prior(ABC):
 
 
 class UniformPrior(Prior):
-    def __init__(self, min_val, max_val):
+    """
+    Class for a uniform prior.
+    """
+
+    @typechecked
+    def __init__(self, min_val: float, max_val: float) -> None:
         self.min_val = min_val
         self.max_val = max_val
         self.rng = np.random.default_rng()
 
-    def __repr__(self):
+    @typechecked
+    def __repr__(self) -> str:
         return f"Uniform: [{self.min_val:.2f}, {self.max_val:.2f}]"
 
-    def draw_samples(self, n_samples):
+    @typechecked
+    def draw_samples(self, n_samples: int) -> np.ndarray:
         samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
 
         return self.transform_samples(samples)
 
-    def transform_samples(self, unit_samples):
+    @typechecked
+    def transform_samples(self, unit_samples: np.ndarray) -> np.ndarray:
         return self.min_val + (self.max_val - self.min_val) * unit_samples
 
 
 class LogUniformPrior(Prior):
-    def __init__(self, min_val, max_val):
+    """
+    Class for a log-uniform prior.
+    """
+
+    @typechecked
+    def __init__(self, min_val: float, max_val: float) -> None:
         self.log_min = np.log10(min_val)
         self.log_max = np.log10(max_val)
         self.rng = np.random.default_rng()
 
-    def __repr__(self):
+    @typechecked
+    def __repr__(self) -> str:
         return f"LogUniform: [{self.log_min:.2f}, {self.log_max:.2f}]"
 
-    def draw_samples(self, n_samples):
+    @typechecked
+    def draw_samples(self, n_samples: int) -> np.ndarray:
         samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
         return self.transform_samples(samples)
 
-    def transform_samples(self, unit_samples):
+    @typechecked
+    def transform_samples(self, unit_samples: np.ndarray) -> np.ndarray:
         samples = self.log_min + (self.log_max - self.log_min) * unit_samples
         return 10.0**samples
 
 
 class NormalPrior(Prior):
-    def __init__(self, mu, sigma, truncate_zero=False):
+    """
+    Class for a normal prior.
+    """
+
+    @typechecked
+    def __init__(self, mu: float, sigma: float, truncate_zero: bool = False) -> None:
         self.mu = mu
         self.sigma = sigma
         self.truncate_zero = truncate_zero
         self.rng = np.random.default_rng()
 
-    def __repr__(self):
+    @typechecked
+    def __repr__(self) -> str:
         return f"Normal: [{self.mu:.2f}, {self.sigma:.2f}]"
 
-    def draw_samples(self, n_samples):
+    @typechecked
+    def draw_samples(self, n_samples: int) -> np.ndarray:
         samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
         return self.transform_samples(samples)
 
-    def transform_samples(self, unit_samples):
+    @typechecked
+    def transform_samples(self, unit_samples: np.ndarray) -> np.ndarray:
         if self.truncate_zero:
             lower_bound, upper_bound = 0.0, np.inf
 
@@ -93,30 +122,48 @@ class NormalPrior(Prior):
 
 
 class SinPrior(Prior):
-    def __init__(self):
+    """
+    Class for a sine prior.
+    """
+
+    @typechecked
+    def __init__(self) -> None:
         self.rng = np.random.default_rng()
 
-    def __repr__(self):
+    @typechecked
+    def __repr__(self) -> str:
         return "Sin: arccos(1 - 2u)"
 
-    def draw_samples(self, n_samples):
+    @typechecked
+    def draw_samples(self, n_samples: int) -> np.ndarray:
         samples = self.rng.uniform(low=0.0, high=1.0, size=n_samples)
         return self.transform_samples(samples)
 
-    def transform_samples(self, unit_samples):
+    @typechecked
+    def transform_samples(self, unit_samples: np.ndarray) -> np.ndarray:
         return np.arccos(1.0 - 2.0 * unit_samples)
 
 
 class FixedPrior(Prior):
-    def __init__(self, fix_val):
+    """
+    Class for a fixed prior.
+    """
+
+    @typechecked
+    def __init__(self, fix_val: float) -> None:
         self.fix_val = fix_val
 
-    def __repr__(self):
+    @typechecked
+    def __repr__(self) -> str:
         return f"Fixed: {self.fix_val:.2f}"
 
-    def draw_samples(self, n_samples):
+    @typechecked
+    def draw_samples(self, n_samples: int) -> None:
 
         return self.fix_val
 
-    def transform_samples(self, unit_samples):
-        """ """
+    @typechecked
+    def transform_samples(self, unit_samples: np.ndarray) -> None:
+        """
+        Method to transform samples.
+        """

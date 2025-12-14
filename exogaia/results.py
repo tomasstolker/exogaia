@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from corner import corner
+from matplotlib.figure import Figure
 from scipy.stats import norm
 from typeguard import typechecked
 
@@ -42,7 +43,10 @@ class FitResults(ExoGaia):
         self.data_table = pickle_data["data_table"]
         self.epoch_astrometry = pickle_data["epoch_astrometry"]
 
-    def plot_posterior(self, truths: List[float] = None, output_file: str = None):
+    @typechecked
+    def plot_posterior(
+        self, truths: List[float] = None, output_file: str = None
+    ) -> Figure:
         """
         Plot posterior
         """
@@ -123,7 +127,7 @@ class FitResults(ExoGaia):
             q_16, q_50, q_84 = np.percentile(post_samples[:, i], [16.0, 50.0, 84])
             q_minus, q_plus = q_50 - q_16, q_84 - q_50
 
-            if i in [0, 1, 2, 3, 4]:
+            if i in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]:
                 fmt = "{0:.2f}".format
             else:
                 fmt = "{0:.1f}".format
@@ -159,12 +163,15 @@ class FitResults(ExoGaia):
             ax.yaxis.label.set_fontsize(15.0)
             ax.tick_params(axis="both", labelsize=13.0)
 
-        if output_file is not None:
+        if output_file is None:
+            plt.show()
+        else:
             fig.savefig(output_file)
 
         return fig
 
-    def plot_residuals(self, output_file: str = None):
+    @typechecked
+    def plot_residuals(self, output_file: str = None) -> Figure:
         """
         Plot residuals
         """
@@ -203,12 +210,15 @@ class FitResults(ExoGaia):
         plt.xlabel("Time (yr)")
         plt.ylabel("Residuals (mas)")
 
-        if output_file is not None:
-            fig.savefig(output_file)
+        if output_file is None:
+            plt.show()
+        else:
+            plt.savefig(output_file)
 
         return fig
 
-    def plot_orbit(self, output_file: str = None):
+    @typechecked
+    def plot_orbit(self, output_file: str = None) -> Figure:
         """
         Orbit plot
         """
@@ -274,7 +284,9 @@ class FitResults(ExoGaia):
         plt.xlim(lim_max, -lim_max)
         plt.ylim(-lim_max, lim_max)
 
-        if output_file is not None:
+        if output_file is None:
+            plt.show()
+        else:
             plt.savefig(output_file)
 
         return fig

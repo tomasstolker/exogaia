@@ -4,6 +4,7 @@ Module with the ``NestedSampler`` class.
 
 import os
 import pickle
+import time
 import warnings
 
 from typing import Optional
@@ -42,7 +43,7 @@ class NestedSampler(ExoGaia):
     """
 
     @typechecked
-    def __init__(self, epoch_astrometry: EpochAstrometry = None) -> None:
+    def __init__(self, epoch_astrometry: EpochAstrometry) -> None:
         """
         Returns
         -------
@@ -62,16 +63,23 @@ class NestedSampler(ExoGaia):
         self.set_priors()
 
     @typechecked
-    def set_priors(self):
+    def set_priors(self) -> None:
+        """
+        Returns
+        -------
+        NoneType
+            None
+        """
+
         # Set default priors
 
         least_sq = LeastSquares(epoch_astrometry=self.epoch_astrometry)
         _, best_param, _, ruwe = least_sq.singl_5param()
 
-        if ruwe > 1.2:
+        if ruwe > 1.1:
             _, best_param, _, ruwe = least_sq.accel_7param()
 
-        if ruwe > 1.2:
+        if ruwe > 1.1:
             _, best_param, _, ruwe = least_sq.accel_9param()
 
         self.priors["ra"] = NormalPrior(best_param[0], 0.1)
@@ -103,9 +111,14 @@ class NestedSampler(ExoGaia):
         resume: bool = False,
         output_folder: str = "multinest/",
         kwargs_multinest: Optional[dict] = None,
-    ):
+    ) -> None:
         """
         Run MultiNest
+
+        Returns
+        -------
+        NoneType
+            None
         """
 
         self.print_section("Orbit fit with MultiNest")
@@ -182,11 +195,12 @@ class NestedSampler(ExoGaia):
             Prior transform
             """
 
+            # start = time.time()
+
             # delta_RA, delta_Dec (mas)
             # Default: uniform [-10, 10]
             cube[0] = self.priors["ra"].draw_samples(1)
             cube[1] = self.priors["dec"].draw_samples(1)
-            # print(self.priors["dec"].draw_samples(1))
 
             # Parallax (mas)
             # Default: uniform [0, 100]
@@ -230,8 +244,25 @@ class NestedSampler(ExoGaia):
                 cube[12] = self.priors["mass_2"].fix_val
             else:
                 # Default: uniform [min_m2, m1] with mass_2 < mass_1
-                m2_prior = UniformPrior(self.priors["mass_2"].min_val, cube[11])
-                cube[12] = m2_prior.draw_samples(1)
+                if isinstance(self.priors["mass_2"], UniformPrior):
+                    m2_prior = UniformPrior(self.priors["mass_2"].min_val, cube[11])
+                    cube[12] = m2_prior.draw_samples(1)
+
+                else:
+                    m2_sample = np.inf
+                    m2_prior = NormalPrior(
+                        self.priors["mass_2"].mu,
+                        self.priors["mass_2"].sigma,
+                        truncate_zero=True,
+                    )
+
+                    while m2_sample > cube[11]:
+                        m2_sample = m2_prior.draw_samples(1)
+
+                    cube[12] = m2_sample
+
+            # end = time.time()
+            # print(end-start)
 
             return cube
 
@@ -240,15 +271,20 @@ class NestedSampler(ExoGaia):
             Log-likelihood function
             """
 
-            bin_model = binary_model.calc_model(params)
+            param_list = []
+            for i in range(n_params):
+                param_list.append(params[i])
+
+            bin_model = binary_model.calc_model(param_list)
+            # binary_model.plot_orbit(param_list, 'test.png')
 
             res = self.data_table["centroid_pos_al"] - bin_model
             var = self.data_table["centroid_pos_error_al"] ** 2
 
+            # print(np.sum(res**2 / var)/(len(self.data_table["centroid_pos_al"])-n_params))
+
             return -0.5 * np.sum(res**2 / var)
 
-        # help(pymultinest.run)
-        # exit()
         # Run sampling with MultiNest
         pymultinest.run(
             log_likelihood,
