@@ -355,7 +355,7 @@ class BinaryModel(ExoGaia):
 
     @typechecked
     def plot_orbit(
-        self, model_param: Union[List[float], np.ndarray], output_file: str = None
+        self, model_param: Union[List[float], np.ndarray], plot_file: str = None
     ) -> Figure:
         """
         Orbit plot
@@ -446,9 +446,9 @@ class BinaryModel(ExoGaia):
         plt.xlim(lim_max, -lim_max)
         plt.ylim(-lim_max, lim_max)
 
-        if output_file is None:
+        if plot_file is None:
             plt.show()
         else:
-            plt.savefig(output_file)
+            plt.savefig(plot_file)
 
         return fig

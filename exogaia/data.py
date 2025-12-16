@@ -3,7 +3,7 @@ Module for handling epoch astrometry data.
 """
 
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import h5py
 import healpy
@@ -46,6 +46,13 @@ class EpochAstrometry(ExoGaia):
         self.gaia_release = gaia_release
         self.primary_mass = primary_mass
         self.data_table = None
+
+        self.ra = None
+        self.dec = None
+        self.parallax = None
+        self.pmra = None
+        self.pmdec = None
+        self.phot_g_mean_mag = None
 
         # Start of the Gaia mission
         self.time_start = Time("2014-07-25 10:30:00", scale="utc")
@@ -106,11 +113,6 @@ class EpochAstrometry(ExoGaia):
     @typechecked
     def simulate_data(
         self,
-        ra: float,
-        dec: float,
-        parallax: float,
-        pmra: float,
-        pmdec: float,
         mass_1: float,
         mass_2: float,
         sma: float,
@@ -119,10 +121,15 @@ class EpochAstrometry(ExoGaia):
         aop: float,
         pan: float,
         tau: float,
-        phot_g_mean_mag: float,
         sigma_per_ccd: Optional[float] = None,
         csv_out: Optional[str] = None,
-    ) -> None:
+        ra: Optional[float] = None,
+        dec: Optional[float] = None,
+        parallax: Optional[float] = None,
+        pmra: Optional[float] = None,
+        pmdec: Optional[float] = None,
+        phot_g_mean_mag: Optional[float] = None,
+    ) -> List[float]:
         """
         Method to predict the epoch astrometry for a binary
         for a given Gaia data release. The function and
@@ -145,16 +152,6 @@ class EpochAstrometry(ExoGaia):
 
         Parameters
         ----------
-        ra : float
-            RA coordinate (deg) at the reference epoch of the ``gaia_release``.
-        dec : float
-            Dec coordinate (deg) at the reference epoch of the ``gaia_release``.
-        parallax : float
-            Parallax (mas).
-        pmra : float
-            Proper motion in RA (mas/yr).
-        pmdec : float
-            Proper motion in Dec (mas/yr).
         mass_1 : float
             Primary mass (Msun).
         mass_2 : float
@@ -171,17 +168,49 @@ class EpochAstrometry(ExoGaia):
             Position angle of the ascending nodes (rad).
         tau : float
             Periastron time, relative to the reference epoch of ``gaia_release``.
-        phot_g_mean_mag : float
-            Gaia G-band magnitude.
         sigma_per_ccd : float, None
             The AL uncertainty per CCD (mas). Setting the argument
             to ``None`` will adopt the G magnitude dependent
             uncertainty from Holl et al. (2023).
         csv_out : str
             Output CSV file to store the simulated epoch astrometry.
+        ra : float, None
+            RA coordinate (deg) at the reference epoch of the ``gaia_release``.
+        dec : float, None
+            Dec coordinate (deg) at the reference epoch of the ``gaia_release``.
+        parallax : float
+            Parallax (mas).
+        pmra : float, None
+            Proper motion in RA (mas/yr).
+        pmdec : float, None
+            Proper motion in Dec (mas/yr).
+        phot_g_mean_mag : float, None
+            Gaia G-band magnitude.
+
+        Returns
+        -------
+        list(float)
+            List with model parameters.
         """
 
         self.print_section("Simulate data")
+
+        if (
+            ra is not None
+            and dec is not None
+            and parallax is not None
+            and pmra is not None
+            and pmdec is not None
+            and phot_g_mean_mag is not None
+        ):
+            self.ra = ra
+            self.dec = dec
+            self.parallax = parallax
+            self.pmra = pmra
+            self.pmdec = pmdec
+            self.phot_g_mean_mag = phot_g_mean_mag
+
+        # HEALPix data
 
         data_folder = Path.home() / ".exogaia"
 
@@ -208,7 +237,7 @@ class EpochAstrometry(ExoGaia):
         # by searching for the nearest position in a set of pre-
         # downloaded 49152 sky positions (healpix level 64)
 
-        healp_num = healpy.ang2pix(64, ra, dec, lonlat=True)
+        healp_num = healpy.ang2pix(64, self.ra, self.dec, lonlat=True)
 
         with h5py.File(healpix_file, "r") as hdf5_file:
             healp_table = Table(hdf5_file[f"healpix_64_{healp_num}"][:])
@@ -267,7 +296,9 @@ class EpochAstrometry(ExoGaia):
             df = pd.read_csv(data_file)
 
             sigma_per_ccd = np.interp(
-                phot_g_mean_mag, df["Gaia G mag"], df["CCD AL scan uncertainty (mas)"]
+                self.phot_g_mean_mag,
+                df["Gaia G mag"],
+                df["CCD AL scan uncertainty (mas)"],
             )
 
         sigma_per_transit = sigma_per_ccd / np.sqrt(n_ccd_avg)
@@ -285,12 +316,12 @@ class EpochAstrometry(ExoGaia):
         self.data_table = pd.DataFrame(sim_astrom)
 
         print("\nStellar parameters:")
-        print(f"   - RA (deg) = {ra:.2f}")
-        print(f"   - Dec (deg) = {dec:.2f}")
-        print(f"   - Parallax (mas) = {parallax:.2f}")
-        print(f"   - Proper motion in RA (mas/yr) = {pmra:.2f}")
-        print(f"   - Proper motion in Dec (mas/yr) = {pmdec:.2f}")
-        print(f"   - G-band magnitude (au) = {phot_g_mean_mag:.2f}")
+        print(f"   - RA (deg) = {self.ra:.2f}")
+        print(f"   - Dec (deg) = {self.dec:.2f}")
+        print(f"   - Parallax (mas) = {self.parallax:.2f}")
+        print(f"   - Proper motion in RA (mas/yr) = {self.pmra:.2f}")
+        print(f"   - Proper motion in Dec (mas/yr) = {self.pmdec:.2f}")
+        print(f"   - G-band magnitude = {self.phot_g_mean_mag:.2f}")
 
         print("\nOrbit parameters:")
         print(f"   - Primary mass (Msun) = {mass_1:.2f}")
@@ -303,11 +334,11 @@ class EpochAstrometry(ExoGaia):
         print(f"   - Relative time of periastron = {tau:.2f}")
 
         model_param = [
-            ra,
-            dec,
-            parallax,
-            pmra,
-            pmdec,
+            self.ra,
+            self.dec,
+            self.parallax,
+            self.pmra,
+            self.pmdec,
             sma,
             ecc,
             inc,
@@ -332,6 +363,8 @@ class EpochAstrometry(ExoGaia):
 
         if csv_out is not None:
             self.data_table.to_csv(csv_out, index=False)
+
+        return model_param
 
     @typechecked
     def get_nss_tables(self) -> None:
@@ -382,7 +415,74 @@ class EpochAstrometry(ExoGaia):
             )
 
     @typechecked
-    def query_source(self, source_id: Optional[Union[int, str]] = None) -> None:
+    def query_source(
+        self, source_id: Optional[Union[int, str]] = None, gaia_release: str = "DR3"
+    ) -> List[float]:
+        """
+        Parameters
+        ----------
+        source_id : int, str
+            Gaia source ID for the data release provided as argument of ``gaia_release``.
+        gaia_release : str
+            Gaia data release (default: DR3).
+
+        Returns
+        -------
+        list(float)
+            List with retrieved stellar parameters.
+        """
+
+        self.print_section("Querying source")
+
+        if gaia_release in ["DR4", "DR5"]:
+            raise ValueError("TODO")
+
+        print(f"Gaia release: {gaia_release}")
+        print(f"Source ID: {source_id}\n")
+
+        # Retrieve RA, Dec, parallax, proper motion, and G magnitude
+
+        gaia_query = f"""
+        SELECT ra, ra_error, dec, dec_error, parallax, parallax_error,
+               pmra, pmra_error, pmdec, pmdec_error, phot_g_mean_mag
+        FROM gaia{gaia_release.lower()}.gaia_source
+        WHERE source_id = {source_id}
+        """
+
+        gaia_job = Gaia.launch_job_async(gaia_query, dump_to_file=False, verbose=False)
+
+        gaia_result = gaia_job.get_results()[0]
+
+        ra = float(gaia_result["ra"])
+        ra_error = float(gaia_result["ra_error"])
+        dec = float(gaia_result["dec"])
+        dec_error = float(gaia_result["dec_error"])
+        parallax = float(gaia_result["parallax"])
+        parallax_error = float(gaia_result["parallax_error"])
+        pmra = float(gaia_result["pmra"])
+        pmra_error = float(gaia_result["pmra_error"])
+        pmdec = float(gaia_result["pmdec"])
+        pmdec_error = float(gaia_result["pmdec_error"])
+        phot_g_mean_mag = float(gaia_result["phot_g_mean_mag"])
+
+        print(f"\nRA (deg): {ra:.3f} +/- {ra_error:.3f}")
+        print(f"Dec (deg): {dec:.3f} +/- {dec_error:.3f}")
+        print(f"Parallax (mas): {parallax:.3f} +/- {parallax_error:.3f}")
+        print(f"Proper motion in RA (mas/yr): {pmra:.3f} +/- {pmra_error:.3f}")
+        print(f"Proper motion in Dec (mas/yr): {pmdec:.3f} +/- {pmdec_error:.3f}")
+        print(f"G-band magnitude: {phot_g_mean_mag:.3f}")
+
+        self.ra = ra
+        self.dec = dec
+        self.parallax = parallax
+        self.pmra = pmra
+        self.pmdec = pmdec
+        self.phot_g_mean_mag = phot_g_mean_mag
+
+        return [ra, dec, parallax, pmra, pmdec, phot_g_mean_mag]
+
+    @typechecked
+    def retrieve_data(self, source_id: Optional[Union[int, str]] = None) -> None:
         """
         Parameters
         ----------
@@ -390,7 +490,9 @@ class EpochAstrometry(ExoGaia):
             Data file with the Gaia epoch astrometry.
         """
 
-        self.print_section(f"Querying source in GAIA {self.gaia_release}")
+        self.query_source(source_id, gaia_release=self.gaia_release)
+
+        self.print_section("Retrieving epoch astrometry")
 
         if self.gaia_release in ["DR4", "DR5"]:
             raise ValueError("TODO")

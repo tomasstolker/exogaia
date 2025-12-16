@@ -187,6 +187,15 @@ class NestedSampler(ExoGaia):
         """
 
         bin_model = self.binary_model.calc_model(params)
+        # self.binary_model.plot_orbit(params, 'test.png')
+
+        if np.any(np.isnan(bin_model)):
+            print("NAN", params)
+            return -np.inf
+
+        if np.any(np.isinf(bin_model)):
+            print("INF", params)
+            return -np.inf
 
         res = self.data_table["centroid_pos_al"] - bin_model
         var = self.data_table["centroid_pos_error_al"] ** 2

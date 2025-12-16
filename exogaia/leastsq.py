@@ -282,8 +282,12 @@ class LeastSquares(ExoGaia):
 
             axs[0].set_xlabel(r"$\alpha$ (deg)")
             axs[0].set_ylabel(r"$\delta$ (deg)")
+            axs[0].invert_xaxis()
+
             axs[1].set_xlabel("Time (yr)")
             axs[1].set_ylabel("Residuals (mas)")
+            axs[1].invert_xaxis()
+
             axs[1].text(
                 0.03,
                 0.92,

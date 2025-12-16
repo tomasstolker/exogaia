@@ -54,7 +54,7 @@ class FitResults(ExoGaia):
         self.print_section("Plot posterior")
 
         post_samples = np.copy(self.samples)
-        post_samples[:, 5] = np.log10(post_samples[:, 5])
+        post_samples[:, 5] = post_samples[:, 5]
 
         # Convert inc, aop, pan from rad to deg
         post_samples[:, 7:10] = np.degrees(post_samples[:, 7:10])
@@ -224,7 +224,7 @@ class FitResults(ExoGaia):
         """
 
         # Epoch astrometry data
-        obs_pos = self.data_table["centroid_pos_error_al"]
+        obs_err = self.data_table["centroid_pos_error_al"]
         scan_ang = self.data_table["scan_pos_angle"]
 
         # Best sample
@@ -255,25 +255,55 @@ class FitResults(ExoGaia):
         ax = plt.gca()
 
         plt.plot(
-            delta_ra_full,
-            delta_dec_full,
+            1e3 * delta_ra_full,
+            1e3 * delta_dec_full,
             ls="-",
-            lw=1.0,
+            lw=1.5,
             marker="none",
             color="black",
         )
 
-        plt.plot(delta_ra + res_ra, delta_dec + res_dec, "o", ms=2.0, color="tab:gray")
-
         for i, res_item in enumerate(residuals):
-            x1 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item + obs_pos[i])
-            x2 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item - obs_pos[i])
-            y1 = delta_dec[i] + np.cos(scan_ang[i]) * (res_item + obs_pos[i])
-            y2 = delta_dec[i] + np.cos(scan_ang[i]) * (res_item - obs_pos[i])
-            plt.plot([x1, x2], [y1, y2], "-", lw=1, color="tab:gray")
+            if i == 0:
+                color = "tab:green"
+                zorder = 3
 
-        plt.xlabel(r"$\Delta$RA (mas)")
-        plt.ylabel(r"$\Delta$Dec (mas)")
+            elif i == len(residuals) - 1:
+                color = "tab:red"
+                zorder = 3
+
+            else:
+                color = "tab:purple"
+                zorder = 2
+
+            x1 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item + obs_err[i])
+            x2 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item - obs_err[i])
+            y1 = delta_dec[i] + np.cos(scan_ang[i]) * (res_item + obs_err[i])
+            y2 = delta_dec[i] + np.cos(scan_ang[i]) * (res_item - obs_err[i])
+
+            plt.plot(
+                [1e3 * x1, 1e3 * x2],
+                [1e3 * y1, 1e3 * y2],
+                "-",
+                lw=1,
+                color=color,
+                zorder=zorder,
+            )
+
+            plt.plot(
+                1e3 * delta_ra[i] + 1e3 * np.sin(scan_ang[i]) * res_item,
+                1e3 * delta_dec[i] + 1e3 * np.cos(scan_ang[i]) * res_item,
+                ls="none",
+                marker="s",
+                ms=5.0,
+                mew=1.2,
+                color=color,
+                mec="black",
+                zorder=zorder,
+            )
+
+        plt.xlabel(r"$\Delta$RA ($\mu$as)")
+        plt.ylabel(r"$\Delta$Dec ($\mu$as)")
 
         x_lim = ax.get_xlim()
         y_lim = ax.get_ylim()
