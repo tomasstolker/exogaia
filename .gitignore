@@ -1,5 +1,6 @@
 *.pyc
 .DS_Store
+exogaia/_version.py
 docs/_build/
 docs/.ipynb_checkpoints/
 docs/multinest/

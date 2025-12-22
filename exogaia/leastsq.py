@@ -1070,6 +1070,7 @@ class LeastSquares(ExoGaia):
         tau_grid = np.zeros((loga_list.size, ecc_list.size, tau_list.size))
 
         global_ruwe = np.inf
+        global_model = None
         global_param = None
         global_sigma = None
         global_orbit = None
@@ -1114,7 +1115,7 @@ class LeastSquares(ExoGaia):
 
                     if ruwe < global_ruwe:
                         global_ruwe = ruwe
-                        # global_model = best_model
+                        global_model = best_model
                         global_param = best_param
                         global_sigma = param_sig
                         global_orbit = [sma, ecc_item, tau_item]
@@ -1154,7 +1155,7 @@ class LeastSquares(ExoGaia):
         # plt.savefig("test.png")
         # plt.close()
 
-        print(f"\nBest-fit parameters (RUWE = {global_ruwe:.3f}):")
+        print(f"Best-fit parameters (RUWE = {global_ruwe:.3f}):")
         print(f"   - RA (deg) = {global_param[0]:.3f} +/- {global_sigma[0]:.3f}")
         print(f"   - Dec (deg) = {global_param[1]:.3f} +/- {global_sigma[1]:.3f}")
         print(f"   - Parallax (mas) = {global_param[2]:.3f} +/- {global_sigma[2]:.3f}")
