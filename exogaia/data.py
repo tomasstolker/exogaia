@@ -1,5 +1,5 @@
 """
-Module for handling epoch astrometry data.
+Module for Gaia epoch astrometry data.
 """
 
 from pathlib import Path
@@ -25,7 +25,8 @@ Gaia.ROW_LIMIT = -1
 
 class EpochAstrometry(ExoGaia):
     """
-    Class for handling epoch astrometry data.
+    Class for reading, querying, and simulating Gaia
+    epoch astrometry data.
     """
 
     @typechecked
@@ -37,8 +38,19 @@ class EpochAstrometry(ExoGaia):
         """
         Parameters
         ----------
-        data_file : str
-            Data file with the Gaia epoch astrometry.
+        primary_mass : tuple(float, float), None
+            Primary mass and uncertainty (Msun). The primary mass is
+            not stored if the argument is set to ``None``. Not all
+            functionalities of ``exogaia`` can be used in that case.
+        gaia_release : str
+            Gaia release (DR3, DR4, DR5) of the epoch astrometry.
+            Simulating data is possible for all releases, but querying
+            data will only be possible for the upcoming DR4 and DR5.
+
+        Returns
+        -------
+        NoneType
+            None
         """
 
         self.print_section("Epoch astrometry")
@@ -71,9 +83,22 @@ class EpochAstrometry(ExoGaia):
 
         print(f"Gaia release: {self.gaia_release}")
         print(f"Reference epoch: {self.ref_epoch}")
-        print(f"\nPrimary mass (Msun): {primary_mass[0]:.2f} +/- {primary_mass[1]:.2f}")
+
+        if primary_mass is not None:
+            print(
+                f"\nPrimary mass (Msun): {primary_mass[0]:.2f} +/- {primary_mass[1]:.2f}"
+            )
 
     def __repr__(self):
+        """
+        String representation of the data table of the class.
+
+        Returns
+        -------
+        str
+            Header of the data table if available.
+        """
+
         if self.data_table is None:
             data_str = "Data table is empty"
         else:
@@ -87,10 +112,17 @@ class EpochAstrometry(ExoGaia):
         data_file: str,
     ) -> None:
         """
+        Method for reading in epoch astrometry from a file.
+
         Parameters
         ----------
         data_file : str
             Data file with the Gaia epoch astrometry.
+
+        Returns
+        -------
+        NoneType
+            None
         """
 
         self.print_section("Read data file")
@@ -131,10 +163,9 @@ class EpochAstrometry(ExoGaia):
         phot_g_mean_mag: Optional[float] = None,
     ) -> List[float]:
         """
-        Method to predict the epoch astrometry for a binary
-        for a given Gaia data release. The function and
-        ``healpix`` data has been adopted from ``gaiamock``
-        by El-Badry et al. (2025)
+        Method to simulate the epoch astrometry for a binary system.
+        The HEALPix data has been adopted from ``gaiamock`` by
+        El-Badry et al. (2025).
 
         MIT License
 
@@ -167,7 +198,8 @@ class EpochAstrometry(ExoGaia):
         pan : float
             Position angle of the ascending nodes (rad).
         tau : float
-            Periastron time, relative to the reference epoch of ``gaia_release``.
+            Periastron time, relative to the reference epoch
+            of ``gaia_release``.
         sigma_per_ccd : float, None
             The AL uncertainty per CCD (mas). Setting the argument
             to ``None`` will adopt the G magnitude dependent
@@ -175,9 +207,11 @@ class EpochAstrometry(ExoGaia):
         csv_out : str
             Output CSV file to store the simulated epoch astrometry.
         ra : float, None
-            RA coordinate (deg) at the reference epoch of the ``gaia_release``.
+            RA coordinate (deg) at the reference epoch of
+            the ``gaia_release``.
         dec : float, None
-            Dec coordinate (deg) at the reference epoch of the ``gaia_release``.
+            Dec coordinate (deg) at the reference epoch of
+            the ``gaia_release``.
         parallax : float
             Parallax (mas).
         pmra : float, None
@@ -190,7 +224,12 @@ class EpochAstrometry(ExoGaia):
         Returns
         -------
         list(float)
-            List with model parameters.
+            List with model parameters, as RA (deg), Dec (deg),
+            parallax (mas), RA proper motion (mas/yr), Dec proper
+            motion (mas/yr), semi-major axis (au), eccentricity,
+            inclination (deg), argument of periastron (rad),
+            position angle of ascending node (rad), relative time
+            of periastron, primary mass (Msun), secondary mass (Msun).
         """
 
         self.print_section("Simulate data")
@@ -369,23 +408,18 @@ class EpochAstrometry(ExoGaia):
     @typechecked
     def get_nss_tables(self) -> None:
         """
-        Parameters
-        ----------
-        data_file : str
-            Data file with the Gaia epoch astrometry.
+        Method for downloading and storing the Gaia non-single star
+        (NSS) tables. The output will be stored in `ECSV files
+        <https://docs.astropy.org/en/stable/io/ascii/ecsv.html>`_.
+        Currently, only ``gaia_release="DR3"`` is supported.
+
+        Returns
+        -------
+        NoneType
+            None
         """
 
         self.print_section("Retrieve Gaia non-single star tables")
-
-        # List all Gaia tables
-        # for table_item in Gaia.load_tables(only_names=True):
-        #     print (table_item.get_qualified_name())
-
-        # Gaia DR3 NSS tables
-        # gaiadr3.nss_acceleration_astro
-        # gaiadr3.nss_non_linear_spectro
-        # gaiadr3.nss_two_body_orbit
-        # gaiadr3.nss_vim_fl
 
         if self.gaia_release in ["DR4", "DR5"]:
             raise ValueError(
@@ -393,12 +427,40 @@ class EpochAstrometry(ExoGaia):
                 "Please set the 'gaia_release' argument to 'DR3'."
             )
 
-        for table_item in ["nss_acceleration_astro", "nss_two_body_orbit"]:
+        # List all Gaia tables
+        # for table_item in Gaia.load_tables(only_names=True):
+        #     print (table_item.get_qualified_name())
+
+        if self.gaia_release == "DR4":
+            # Gaia DR3 NSS tables
+            gaia_tables = [
+                "gaiadr3.nss_acceleration_astro",
+                "gaiadr3.nss_non_linear_spectro",
+                "gaiadr3.nss_two_body_orbit",
+                "gaiadr3.nss_vim_fl",
+            ]
+
+        elif self.gaia_release == "DR4":
+            # Gaia DR4 NSS tables
+
+            gaia_tables = [
+                "gaiadr4.nss_acceleration_astro",
+                "gaiadr4.nss_non_linear_spectro",
+                "gaiadr4.nss_two_body_orbit",
+                "gaiadr4.nss_vim_fl",
+                "gaiadr4.nss_epoch_flags",
+                "gaiadr4.nss_masses",
+                "gaiadr4.nss_multiple_orbits",
+                "gaiadr4.nss_multiplicity",
+                "gaiadr4.nss_resolved_pair",
+            ]
+
+        for table_item in gaia_tables:
             # Query Gaia NSS tables
 
             gaia_query = f"""
             SELECT *
-            FROM gaia{self.gaia_release.lower()}.{table_item}
+            FROM {table_item}
             """
 
             # Launch the Gaia job and get the results
@@ -419,23 +481,34 @@ class EpochAstrometry(ExoGaia):
         self, source_id: Optional[Union[int, str]] = None, gaia_release: str = "DR3"
     ) -> List[float]:
         """
+        Method for retrieving stellar parameter from the Gaia catalog,
+        specifically the RA/Dec, parallax, proper motion, and G-band
+        magnitude.
+
         Parameters
         ----------
         source_id : int, str
-            Gaia source ID for the data release provided as argument of ``gaia_release``.
+            Gaia source ID for the selected ``gaia_release``.
         gaia_release : str
-            Gaia data release (default: DR3).
+            Gaia data release (default: DR3). The release can be set
+            both here and with the class initialization such that the
+            stellar parameters can be retrieved from DR3, but epoch
+            astrometry can be simulated for DR4/DR5.
 
         Returns
         -------
         list(float)
-            List with retrieved stellar parameters.
+            List with retrieved stellar parameters, as RA, Dec, parallax,
+            RA proper motion, Dec proper motion, G-band magnitude.
         """
 
         self.print_section("Querying source")
 
         if gaia_release in ["DR4", "DR5"]:
-            raise ValueError("TODO")
+            raise ValueError(
+                "The 'query_source' method supports "
+                "currently only gaia_release='DR3'."
+            )
 
         print(f"Gaia release: {gaia_release}")
         print(f"Source ID: {source_id}\n")
@@ -465,11 +538,11 @@ class EpochAstrometry(ExoGaia):
         pmdec_error = float(gaia_result["pmdec_error"])
         phot_g_mean_mag = float(gaia_result["phot_g_mean_mag"])
 
-        print(f"\nRA (deg): {ra:.3f} +/- {ra_error:.3f}")
-        print(f"Dec (deg): {dec:.3f} +/- {dec_error:.3f}")
-        print(f"Parallax (mas): {parallax:.3f} +/- {parallax_error:.3f}")
-        print(f"Proper motion in RA (mas/yr): {pmra:.3f} +/- {pmra_error:.3f}")
-        print(f"Proper motion in Dec (mas/yr): {pmdec:.3f} +/- {pmdec_error:.3f}")
+        print(f"\nRA: {ra:.3f} deg +/- {ra_error:.3f} mas")
+        print(f"Dec: {dec:.3f} deg +/- {dec_error:.3f} mas")
+        print(f"Parallax: {parallax:.3f} +/- {parallax_error:.3f} mas")
+        print(f"Proper motion in RA: {pmra:.3f} +/- {pmra_error:.3f} mas/yr")
+        print(f"Proper motion in Dec: {pmdec:.3f} +/- {pmdec_error:.3f} mas/yr")
         print(f"G-band magnitude: {phot_g_mean_mag:.3f}")
 
         self.ra = ra
@@ -484,18 +557,35 @@ class EpochAstrometry(ExoGaia):
     @typechecked
     def retrieve_data(self, source_id: Optional[Union[int, str]] = None) -> None:
         """
+        Method for retrieving the epoch astrometry for the selected
+        Gaia source. This will only be possible for the future DR4
+        and DR5 data releases.
+
         Parameters
         ----------
-        data_file : str
-            Data file with the Gaia epoch astrometry.
+        source_id : int, str
+            Gaia source ID for the selected ``gaia_release`` of the
+            class initialization.
+
+        Returns
+        -------
+        NoneType
+            None
         """
 
         self.query_source(source_id, gaia_release=self.gaia_release)
 
         self.print_section("Retrieving epoch astrometry")
 
+        # Gaia DR4 epoch astrometry tables
+        # gaiadr4.epoch_astrometry
+        # gaiadr4.bright_source_astrometry
+
         if self.gaia_release in ["DR4", "DR5"]:
-            raise ValueError("TODO")
+            raise ValueError(
+                "The 'retrieve_data' method will only support "
+                "the future DR4 and DR5 data releases."
+            )
 
         print(f"Gaia release: {self.gaia_release}")
         print(f"Source ID: {source_id}")
@@ -529,10 +619,16 @@ class EpochAstrometry(ExoGaia):
     @typechecked
     def gaia_bh3(self) -> None:
         """
-        Parameters
-        ----------
-        data_file : str
-            Data file with the Gaia epoch astrometry.
+        Method for storing the Gaia DR3 epoch astrometry of
+        the black hole Gaia BH3 in the ``data_table``. The
+        data file can be found `here <https://github.com/
+        tomasstolker/exogaia/blob/main/data/
+        gaiabh3_epochast.dat>`_.
+
+        Returns
+        -------
+        NoneType
+            None
         """
 
         self.print_section("Gaia BH3 epoch data")

@@ -1,5 +1,5 @@
 """
-Module with abstract interfaces.
+Module with the ``ExoGaia`` abstract interface.
 """
 
 from typeguard import typechecked
@@ -19,7 +19,7 @@ class ExoGaia:
         upper_bound: bool = True,
     ) -> None:
         """
-        Internal method for printing a section title.
+        Method for printing a section title.
 
         Parameters
         ----------

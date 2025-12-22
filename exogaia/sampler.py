@@ -1,5 +1,5 @@
 """
-Module with the ``NestedSampler`` class.
+Module with the ``NestedSampler`` and ``MCMCSampler`` classes.
 """
 
 import os
@@ -7,24 +7,15 @@ import pickle
 import sys
 import warnings
 
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 import dynesty
+import emcee
 import numpy as np
+import reddemcee
 
 from schwimmbad import MPIPool
 from typeguard import typechecked
-
-try:
-    import pymultinest
-
-except:
-    warnings.warn(
-        "PyMultiNest could not be imported. "
-        "Perhaps because MultiNest was not built "
-        "and/or found at the LD_LIBRARY_PATH "
-        "(Linux) or DYLD_LIBRARY_PATH (Mac)?"
-    )
 
 from exogaia.core import ExoGaia
 from exogaia.data import EpochAstrometry
@@ -41,12 +32,17 @@ from exogaia.priors import (
 
 class NestedSampler(ExoGaia):
     """
-    Class with the nested sampler.
+    Class for nested sampling with ``MultiNest`` and ``Dynesty``.
     """
 
     @typechecked
     def __init__(self, epoch_astrometry: EpochAstrometry) -> None:
         """
+        Parameters
+        ----------
+        epoch_astrometry : EpochAstrometry
+            ``EpochAstrometry`` object that contains the data.
+
         Returns
         -------
         NoneType
@@ -74,6 +70,8 @@ class NestedSampler(ExoGaia):
     @typechecked
     def set_priors(self) -> None:
         """
+        Method for setting the default parameter priors.
+
         Returns
         -------
         NoneType
@@ -106,12 +104,23 @@ class NestedSampler(ExoGaia):
         self.priors["mass_1"] = NormalPrior(
             self.primary_mass[0], self.primary_mass[1], truncate_zero=True
         )
-        self.priors["mass_2"] = UniformPrior(0.0, 1.0)
+        self.priors["mass_2"] = LogUniformPrior(1e-3, 1.0)
 
     @typechecked
-    def _prior_transform(self, cube):
+    def prior_transform(self, cube):
         """
-        Prior transform
+        Method for transforming the unit cube into a cube
+        with parameter samples.
+
+        Parameters
+        ----------
+        cube : LP_c_double
+            Input unit cube.
+
+        Returns
+        -------
+        LP_c_double
+            Output cube with sampled model parameters.
         """
 
         # delta_RA, delta_Dec (mas)
@@ -181,9 +190,20 @@ class NestedSampler(ExoGaia):
         return cube
 
     @typechecked
-    def _ln_likelihood(self, params) -> float:
+    def log_likelihood(self, params) -> Union[np.float64, float]:
         """
-        Log-likelihood function
+        Method for calculating the log-likelihood for the
+        sampled parameter cube.
+
+        Parameters
+        ----------
+        params : LP_c_double
+            Cube with sampled model parameters.
+
+        Returns
+        -------
+        float
+            Log-likelihood.
         """
 
         bin_model = self.binary_model.calc_model(params)
@@ -212,7 +232,46 @@ class NestedSampler(ExoGaia):
         kwargs_multinest: Optional[dict] = None,
     ) -> None:
         """
-        Run MultiNest
+        Function to run the ``PyMultiNest`` wrapper of the
+        ``MultiNest`` sampler. While ``PyMultiNest`` can be
+        installed with ``pip`` from the PyPI repository,
+        ``MultiNest`` has to be built manually. See the
+        `PyMultiNest documentation <http://johannesbuchner.
+        github.io/PyMultiNest/install.html>`_. The library
+        path of ``MultiNest`` should be set to the
+        environmental variable ``LD_LIBRARY_PATH`` on a
+        Linux machine and ``DYLD_LIBRARY_PATH`` on a Mac.
+        Alternatively, the variable can be set before
+        importing the ``species`` package, for example:
+
+        .. code-block:: python
+
+            >>> import os
+            >>> os.environ['DYLD_LIBRARY_PATH'] = '/path/to/MultiNest/lib'
+            >>> import species
+
+        When using MPI, it is also required to install ``mpi4py`` (e.g.
+        ``pip install mpi4py``), otherwise an error may occur when the
+        ``output_folder`` is created by multiple processes.
+
+        Parameters
+        ----------
+        pickle_file : str
+            Output file name in which the results will be stored.
+            The output file is a Pickle file.
+        n_live_points : int
+            Number of live points used for the nested sampling.
+        resume : bool
+            Resume the posterior sampling from a previous run.
+        output_folder : str
+            Path that is used for the output files from ``MultiNest``.
+        kwargs_multinest : dict, None
+            Dictionary with keyword arguments that can be used to
+            adjust the parameters of the `run() function
+            <https://github.com/JohannesBuchner/PyMultiNest/blob/
+            master/pymultinest/run.py>`_ of the ``PyMultiNest``
+            sampler. See also the `documentation of MultiNest
+            <https://github.com/JohannesBuchner/MultiNest>`_.
 
         Returns
         -------
@@ -221,6 +280,17 @@ class NestedSampler(ExoGaia):
         """
 
         self.print_section("Orbit fit with MultiNest")
+
+        try:
+            import pymultinest
+
+        except:
+            warnings.warn(
+                "PyMultiNest could not be imported. "
+                "Perhaps because MultiNest was not built "
+                "and/or found at the LD_LIBRARY_PATH "
+                "(Linux) or DYLD_LIBRARY_PATH (Mac)?"
+            )
 
         self.output_folder = output_folder
 
@@ -283,7 +353,7 @@ class NestedSampler(ExoGaia):
             os.mkdir(self.output_folder)
 
         @typechecked
-        def _lnprior_multinest(cube, n_dim: int, n_param: int) -> None:
+        def log_prior_multinest(cube, n_dim: int, n_param: int) -> None:
             """
             Function to transform the unit cube into the parameter
             cube. It is not clear how to pass additional arguments
@@ -304,14 +374,14 @@ class NestedSampler(ExoGaia):
                 None
             """
 
-            self._prior_transform(cube)
+            self.prior_transform(cube)
 
         @typechecked
-        def _lnlike_multinest(
+        def log_like_multinest(
             params, n_dim: int, n_param: int
         ) -> Union[float, np.float64]:
             """
-            Function for return the log-likelihood for the
+            Method for calculating the log-likelihood for the
             sampled parameter cube.
 
             Parameters
@@ -335,12 +405,12 @@ class NestedSampler(ExoGaia):
             for i in range(self.n_params):
                 param_list.append(params[i])
 
-            return self._ln_likelihood(param_list)
+            return self.log_likelihood(param_list)
 
         # Run sampling with MultiNest
         pymultinest.run(
-            _lnlike_multinest,
-            _lnprior_multinest,
+            log_like_multinest,
+            log_prior_multinest,
             self.n_params,
             outputfiles_basename=self.output_folder,
             resume=resume,
@@ -409,9 +479,9 @@ class NestedSampler(ExoGaia):
         mpi_pool: bool = False,
     ) -> None:
         """
-        Function for running the fit with a grid of model spectra.
-        The parameter estimation and computation of the marginalized
-        likelihood (i.e. model evidence), are done with ``Dynesty``.
+        Method for running the nested sampling with ``Dynesty``, which
+        computes both the Bayesian evidence (i.e. :math:`\\log{Z}`) and
+        the parameter posterior distributions.
 
         When using MPI, it is also required to install ``mpi4py`` (e.g.
         ``pip install mpi4py``), otherwise an error may occur when the
@@ -420,8 +490,7 @@ class NestedSampler(ExoGaia):
         Parameters
         ----------
         n_live_points : int
-            Number of live points used by the nested sampling
-            with ``Dynesty``.
+            Number of live points used for the nested sampling.
         resume : bool
             Resume the posterior sampling from a previous run.
         output_folder : str
@@ -498,8 +567,8 @@ class NestedSampler(ExoGaia):
             if n_pool is not None:
                 with dynesty.pool.Pool(
                     n_pool,
-                    self._ln_likelihood,
-                    self._prior_transform,
+                    self.log_likelihood,
+                    self.prior_transform,
                     ptform_args=None,
                 ) as pool:
                     print(f"Initialized a Dynesty.pool with {n_pool} workers")
@@ -572,8 +641,8 @@ class NestedSampler(ExoGaia):
 
                     else:
                         dsampler = dynesty.DynamicNestedSampler(
-                            loglikelihood=self._ln_likelihood,
-                            prior_transform=self._prior_transform,
+                            loglikelihood=self.log_likelihood,
+                            prior_transform=self.prior_transform,
                             ndim=self.n_params,
                             ptform_args=None,
                             sample=sample_method,
@@ -597,8 +666,8 @@ class NestedSampler(ExoGaia):
 
                     else:
                         dsampler = dynesty.NestedSampler(
-                            loglikelihood=self._ln_likelihood,
-                            prior_transform=self._prior_transform,
+                            loglikelihood=self.log_likelihood,
+                            prior_transform=self.prior_transform,
                             ndim=self.n_params,
                             ptform_args=None,
                             sample=sample_method,
@@ -629,8 +698,8 @@ class NestedSampler(ExoGaia):
 
                 else:
                     dsampler = dynesty.DynamicNestedSampler(
-                        loglikelihood=self._ln_likelihood,
-                        prior_transform=self._prior_transform,
+                        loglikelihood=self.log_likelihood,
+                        prior_transform=self.prior_transform,
                         ndim=self.n_params,
                         ptform_args=None,
                         pool=pool,
@@ -654,8 +723,8 @@ class NestedSampler(ExoGaia):
 
                 else:
                     dsampler = dynesty.NestedSampler(
-                        loglikelihood=self._ln_likelihood,
-                        prior_transform=self._prior_transform,
+                        loglikelihood=self.log_likelihood,
+                        prior_transform=self.prior_transform,
                         ndim=self.n_params,
                         ptform_args=None,
                         pool=pool,
@@ -693,7 +762,7 @@ class NestedSampler(ExoGaia):
 
         max_idx = np.argmax(ln_like)
         max_lnlike = ln_like[max_idx]
-        best_params = samples[max_idx]
+        # best_params = samples[max_idx]
 
         print("\nSample with the maximum likelihood:")
         print(f"   - ln(L) = {max_lnlike:.2f}")
@@ -715,3 +784,348 @@ class NestedSampler(ExoGaia):
 
         except ImportError:
             mpi_rank = 0
+
+
+class MCMCSampler(ExoGaia):
+    """
+    Class for MCMC sampling with ``emcee`` and ``reddemcee``.
+    """
+
+    @typechecked
+    def __init__(self, epoch_astrometry: EpochAstrometry) -> None:
+        """
+        Parameters
+        ----------
+        epoch_astrometry : EpochAstrometry
+            ``EpochAstrometry`` object that contains the data.
+
+        Returns
+        -------
+        NoneType
+            None
+        """
+
+        self.epoch_astrometry = epoch_astrometry
+        self.data_table = epoch_astrometry.data_table
+        self.primary_mass = epoch_astrometry.primary_mass
+
+        self.output_folder = None
+
+        self.priors = {}
+        self.set_priors()
+
+        self.binary_model = BinaryModel(
+            epoch_astrometry=self.epoch_astrometry, verbose=False
+        )
+
+        # Number of model parameters
+        self.n_params = 5 + 8
+
+        # Parameter index numbers
+        self.param_indices = {
+            "ra": 0,
+            "dec": 1,
+            "parallax": 2,
+            "pmra": 3,
+            "pmdec": 4,
+            "sma": 5,
+            "ecc": 6,
+            "inc": 7,
+            "aop": 8,
+            "pan": 9,
+            "tau": 10,
+            "mass_1": 11,
+            "mass_2": 12,
+        }
+
+    @typechecked
+    def set_priors(self) -> None:
+        """
+        Method for setting the default parameter priors.
+
+        Returns
+        -------
+        NoneType
+            None
+        """
+
+        # Set default priors
+
+        least_sq = LeastSquares(epoch_astrometry=self.epoch_astrometry)
+
+        _, best_param, _, ruwe = least_sq.singl_5param()
+
+        if ruwe > 1.1:
+            _, best_param, _, ruwe = least_sq.accel_7param()
+
+        if ruwe > 1.1:
+            _, best_param, _, ruwe = least_sq.accel_9param()
+
+        self.priors["ra"] = NormalPrior(best_param[0], 0.1)
+        self.priors["dec"] = NormalPrior(best_param[1], 0.1)
+        self.priors["parallax"] = NormalPrior(best_param[2], 0.1)
+        self.priors["pmra"] = NormalPrior(best_param[3], 0.1)
+        self.priors["pmdec"] = NormalPrior(best_param[4], 0.1)
+        self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
+        self.priors["ecc"] = UniformPrior(0.0, 1.0)
+        self.priors["inc"] = SinPrior()
+        self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
+        self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
+        self.priors["tau"] = UniformPrior(0.0, 1.0)
+        self.priors["mass_1"] = NormalPrior(
+            self.primary_mass[0], self.primary_mass[1], truncate_zero=True
+        )
+        self.priors["mass_2"] = UniformPrior(0.0, 1.0)
+
+    @typechecked
+    def log_prior(self, params: np.ndarray) -> float:
+        """
+        Method for the log-prior used by the MCMC.
+
+        Parameters
+        ----------
+        params : np.ndarray
+            Array with the model parameters. The order of the parameter
+            values should be the same as in the ``calc_model`` method
+            of :class:`~exogaia.models.BinaryModel`.
+
+        Returns
+        -------
+        float
+            Log-prior of the model evaluation.
+        """
+
+        log_prior = 0.0
+
+        for param_item, param_idx in self.param_indices.items():
+            if isinstance(self.priors[param_item], UniformPrior):
+                if (
+                    params[param_idx] < self.priors[param_item].min_val
+                    or params[param_idx] > self.priors[param_item].max_val
+                ):
+                    log_prior += -np.inf
+
+            elif isinstance(self.priors[param_item], LogUniformPrior):
+                if (
+                    params[param_idx] < 10.0 ** self.priors[param_item].log_min
+                    or params[param_idx] > 10.0 ** self.priors[param_item].log_max
+                ):
+                    log_prior += -np.inf
+
+            elif isinstance(self.priors[param_item], NormalPrior):
+                if self.priors[param_item].truncate_zero and params[param_idx] < 0.0:
+                    log_prior += -np.inf
+
+                elif self.priors[param_item].truncate_one and params[param_idx] > 1.0:
+                    log_prior += -np.inf
+
+                else:
+                    log_prior += (
+                        -0.5
+                        * (
+                            (params[param_idx] - self.priors[param_item].mu)
+                            / self.priors[param_item].sigma
+                        )
+                        ** 2
+                    )
+
+            elif isinstance(self.priors[param_item], SinPrior):
+                if params[param_idx] <= 0.0 or params[param_idx] >= np.pi:
+                    log_prior += -np.inf
+
+                else:
+                    log_prior += np.log(np.sin(params[param_idx]))
+
+            else:
+                raise ValueError(self.priors[param_item])
+
+        return log_prior
+
+    def log_likelihood(self, params: np.ndarray) -> float:
+        """
+        Method for the log-likelihood used by the MCMC.
+
+        Parameters
+        ----------
+        params : np.ndarray
+            Array with the model parameters. The order of the parameter
+            values should be the same as in the ``calc_model`` method
+            of :class:`~exogaia.models.BinaryModel`.
+
+        Returns
+        -------
+        float
+            Log-likelihood of the model evaluation.
+        """
+
+        bin_model = self.binary_model.calc_model(params)
+
+        if np.any(np.isnan(bin_model)):
+            print("NAN", params)
+            return -np.inf
+
+        if np.any(np.isinf(bin_model)):
+            print("INF", params)
+            return -np.inf
+
+        res = self.data_table["centroid_pos_al"] - bin_model
+        var = self.data_table["centroid_pos_error_al"] ** 2
+
+        return -0.5 * np.sum(res**2 / var)
+
+    @typechecked
+    def log_probability(self, params: np.ndarray) -> Tuple[float, float]:
+        """
+        Method for the log-probability used by the MCMC.
+
+        Parameters
+        ----------
+        params : np.ndarray
+            Array with the model parameters. The order of the parameter
+            values should be the same as in the ``calc_model`` method
+            of :class:`~exogaia.models.BinaryModel`.
+
+        Returns
+        -------
+        float
+            Log-probability (i.e. log-prior + log-likelihood)
+            of the model evaluation.
+        float
+            Log-prior of the model evaluation.
+        """
+
+        log_prior = self.log_prior(params)
+
+        if np.isfinite(log_prior):
+            log_prob = log_prior + self.log_likelihood(params)
+        else:
+            log_prob = -np.inf
+
+        return log_prob, log_prior
+
+    @typechecked
+    def run_mcmc(
+        self,
+        pickle_file: str = "exogaia.pkl",
+        n_walkers: int = 200,
+        n_steps: int = 1000,
+    ) -> None:
+        """
+        Method for running the MCMC ensemble sampler of ``emcee``.
+
+        Parameters
+        ----------
+        pickle_file : str
+            Output file name in which the results will be stored.
+            The output file is a Pickle file.
+        n_walkers : int
+            Number of walkers that will explore the posterior landscape.
+        n_steps : int
+            Number of steps that each walker will make.
+
+        Returns
+        -------
+        NoneType
+            None
+        """
+
+        sampler = emcee.EnsembleSampler(
+            nwalkers=n_walkers,
+            ndim=self.n_params,
+            log_prob_fn=self.log_probability,
+        )
+
+        init_pos = np.zeros((n_walkers, self.n_params))
+        for param_item, param_idx in self.param_indices.items():
+            init_pos[:, param_idx] = self.priors[param_item].draw_samples(n_walkers)
+
+        sampler.run_mcmc(initial_state=init_pos, nsteps=n_steps, progress=True)
+
+        sampler.get_autocorr_time(quiet=True)
+
+        samples = sampler.get_chain(flat=False, thin=1, discard=0)
+        log_prob = sampler.get_log_prob(flat=False, thin=1, discard=0)
+        log_prior = sampler.get_blobs(flat=False, thin=1, discard=0)
+
+        # Save results to pickle
+
+        pickle_data = {
+            "samples": samples,
+            "ln_like": log_prob - log_prior,
+            "ln_z": None,
+            "data_table": self.data_table,
+            "primary_mass": self.primary_mass,
+            "epoch_astrometry": self.epoch_astrometry,
+        }
+
+        with open(pickle_file, "wb") as open_file:
+            pickle.dump(pickle_data, open_file, protocol=pickle.HIGHEST_PROTOCOL)
+
+    @typechecked
+    def run_ptmcmc(
+        self,
+        pickle_file: str = "exogaia.pkl",
+        n_temps: int = 20,
+        n_walkers: int = 200,
+        n_steps: int = 1000,
+        n_sweeps: int = 10,
+    ) -> None:
+        """
+        Method for running the adaptive parallel tempering tempered
+        MCMC ensemble sampler of ``reddemcee``.
+
+        Parameters
+        ----------
+        pickle_file : str
+            Output file name in which the results will be stored.
+            The output file is a Pickle file.
+        n_temps : int
+            Number of temperatures.
+        n_walkers : int
+            Number of walkers that will explore the posterior landscape.
+        n_steps : int
+            Number of steps that each walker will make.
+        n_sweeps : int
+            Number of sweeps to run.
+
+        Returns
+        -------
+        NoneType
+            None
+        """
+
+        sampler = reddemcee.PTSampler(
+            nwalkers=n_walkers,
+            ndim=self.n_params,
+            log_like=self.log_likelihood,
+            log_prior=self.log_prior,
+            ntemps=n_temps,
+        )
+
+        init_pos = np.zeros((n_temps, n_walkers, self.n_params))
+        for param_item, param_idx in self.param_indices.items():
+            init_pos[:, :, param_idx] = self.priors[param_item].draw_samples(n_walkers)
+
+        sampler.run_mcmc(
+            initial_state=init_pos, nsteps=n_steps, nsweeps=n_sweeps, progress=True
+        )
+
+        sampler.get_autocorr_time(quiet=True)
+
+        samples = sampler.get_chain(flat=False, thin=1, discard=0)
+        # log_prob = sampler.get_log_prob(flat=False, thin=1, discard=0)
+        log_like = sampler.get_log_like(flat=False, thin=1, discard=0)
+
+        # Save results to pickle
+
+        pickle_data = {
+            "samples": samples,
+            "ln_like": log_like,
+            "ln_z": None,
+            "data_table": self.data_table,
+            "primary_mass": self.primary_mass,
+            "epoch_astrometry": self.epoch_astrometry,
+        }
+
+        with open(pickle_file, "wb") as open_file:
+            pickle.dump(pickle_data, open_file, protocol=pickle.HIGHEST_PROTOCOL)

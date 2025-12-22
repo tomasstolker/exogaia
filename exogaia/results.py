@@ -4,7 +4,7 @@ Module with the ``FitResults`` class.
 
 import pickle
 
-from typing import List
+from typing import List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,42 +24,204 @@ class FitResults(ExoGaia):
     """
 
     @typechecked
-    def __init__(self, pickle_file: str = None) -> None:
+    def __init__(self, pickle_file: str, burnin: Optional[int] = None) -> None:
         """
+        Parameters
+        ----------
+        pickle_file : str
+            Pickle file that contains the results from the fit.
+        burnin : int, None
+            Number of samples to discard for each walker, i.e. the
+            burnin of the MCMC sampling with ``emcee``. No burnin is
+            removed if the argument is set to ``None``. This parameter
+            has only an effect on the fit results from
+            :class:`~exogaia.sampler.MCMCSampler`.
+
         Returns
         -------
         NoneType
             None
         """
 
+        self.print_section("Fit results")
+
         self.pickle_file = pickle_file
 
         with open(self.pickle_file, "rb") as open_file:
             pickle_data = pickle.load(open_file)
 
+        self.orig_samples = pickle_data["samples"]
         self.samples = pickle_data["samples"]
+        self.n_params = self.samples.shape[-1]
+
         self.ln_like = pickle_data["ln_like"]
         self.ln_z = pickle_data["ln_z"]
+
         self.data_table = pickle_data["data_table"]
         self.epoch_astrometry = pickle_data["epoch_astrometry"]
 
+        print(f"Number of parameters: {self.n_params}")
+        print(f"Samples shape: {self.samples.shape}")
+
+        if self.samples.ndim == 3:
+            if burnin is not None:
+                self.samples = self.samples[burnin:, :, :]
+                self.ln_like = self.ln_like[burnin:, :]
+
+                print(f"\nBurnin: {burnin}")
+                print(f"Samples shape: {self.samples.shape}")
+
+            self.samples = self.samples.reshape(-1, self.n_params)
+            self.ln_like = self.ln_like.reshape(-1)
+            print(f"\nReshaped samples: {self.samples.shape}")
+
+        elif self.samples.ndim == 4:
+            if burnin is not None:
+                self.samples = self.samples[:, burnin:, :, :]
+                self.ln_like = self.ln_like[:, burnin:, :]
+
+                print(f"\nBurnin: {burnin}")
+                print(f"Samples shape: {self.samples.shape}")
+
+            self.samples = self.samples.reshape(-1, self.n_params)
+            self.ln_like = self.ln_like.reshape(-1)
+            print(f"\nReshaped samples: {self.samples.shape}")
+
+        self.labels = [
+            r"$\alpha \cos\delta$ (mas)",
+            r"$\delta$ (mas)",
+            r"$\mu_\alpha \cos\delta$ (mas/yr)",
+            r"$\mu_\delta$ (mas/yr)",
+            r"$\varpi$ (mas)",
+            r"$\log{a/\mathrm{au}}$",
+            r"$e$",
+            r"$i$ (deg)",
+            r"$\omega$ (deg)",
+            r"$\Omega$ (deg)",
+            r"$t_\mathrm{p}$",
+            r"$M_1$ ($M_\odot$)",
+            r"$\log{M_2/M_\odot}$",
+        ]
+
     @typechecked
-    def plot_posterior(
-        self, truths: List[float] = None, output_file: str = None
+    def plot_walkers(
+        self, n_walkers: int = 30, thin: Optional[int] = None, plot_file: str = None
     ) -> Figure:
         """
-        Plot posterior
+        Function for plotting the tracks by the MCMC walkers.
+
+        Parameters
+        ----------
+        n_walkers : int
+            Number of walkers to plot (default: 30).
+        thin : int, None
+            Thin each walker chain by selecting every ``thin`` step. The full
+            chain is plotted if the argument is set to ``None``.
+        plot_file : str, None
+            File name for the output plot. The plot is shown
+            instead of stored if the arguments is set to ``None``.
+
+        Returns
+        -------
+        Figure
+            The Matplotlib ``Figure`` object that can be used
+            for further adjustments of the plot.
+        """
+
+        self.print_section("Plot walkers")
+
+        if thin is None:
+            thin = 1
+
+        print(f"Number of walkers: {n_walkers}")
+        print(f"Thin value: {thin}")
+
+        fig, axs = plt.subplots(13, 1, figsize=(5, 20))
+
+        if self.orig_samples.ndim == 4:
+            samples_arr = np.swapaxes(self.orig_samples, 0, 1)
+            samples_arr = samples_arr.reshape(samples_arr.shape[0], -1, self.n_params)
+
+        else:
+            samples_arr = np.copy(self.orig_samples)
+
+        rand_walk = np.random.randint(0, high=samples_arr.shape[1], size=n_walkers)
+
+        for param_idx in range(samples_arr.shape[2]):
+            for walk_idx in rand_walk:
+                walk_track = samples_arr[::thin, walk_idx, param_idx]
+
+                if param_idx in [5, 12]:
+                    walk_track = np.log10(walk_track)
+
+                elif param_idx in [7, 8, 9]:
+                    walk_track = np.degrees(walk_track)
+
+                axs[param_idx].plot(
+                    walk_track,
+                    ls="-",
+                    lw=0.3,
+                    marker="none",
+                    color="tab:purple",
+                    alpha=0.1,
+                )
+
+                axs[param_idx].set_xlim(0.0, walk_track.size)
+
+                if param_idx == 12:
+                    axs[param_idx].set_xlabel("Step number")
+                else:
+                    axs[param_idx].tick_params(labelbottom=False)
+
+                axs[param_idx].set_ylabel(self.labels[param_idx])
+
+        if plot_file is None:
+            plt.show()
+        else:
+            print(f"Output file: {plot_file}")
+            plt.savefig(plot_file)
+
+        return fig
+
+    @typechecked
+    def plot_posterior(
+        self, truths: List[float] = None, plot_file: str = None
+    ) -> Figure:
+        """
+        Function for plotting the posterior distributions.
+
+        Parameters
+        ----------
+        truths : list(float), None
+            Optional list with the true parameter values that
+            will be included in the corner plot. No truths
+            are included in the plot if the argument is set
+            to ``None``.
+        plot_file : str, None
+            File name for the output plot. The plot is shown
+            instead of stored if the arguments is set to ``None``.
+
+        Returns
+        -------
+        Figure
+            The Matplotlib ``Figure`` object that can be used
+            for further adjustments of the plot.
         """
 
         self.print_section("Plot posterior")
 
         post_samples = np.copy(self.samples)
-        post_samples[:, 5] = post_samples[:, 5]
+
+        # Convert sma to log10(sma)
+        post_samples[:, 5] = np.log10(post_samples[:, 5])
+        truths[5] = np.log10(truths[5])
+
+        # Convert mass_2 to log10(mass_2)
+        post_samples[:, 12] = np.log10(post_samples[:, 12])
+        truths[12] = np.log10(truths[12])
 
         # Convert inc, aop, pan from rad to deg
         post_samples[:, 7:10] = np.degrees(post_samples[:, 7:10])
-
-        n_params = post_samples.shape[1]
 
         # Quantiles for the 1D distributions (-1, 1 sigma)
         quantiles = [norm.cdf(n_sigma) for n_sigma in [-1, 1]]
@@ -72,23 +234,7 @@ class FitResults(ExoGaia):
         levels = [1.0 - np.exp(-0.5 * n_sigma**2) for n_sigma in [1, 2]]
 
         # Exclude 1% of the outliers from the posterior plot for clarity
-        range_select = np.full(n_params, 0.99)
-
-        labels = [
-            r"$\alpha \cos\delta$ (mas)",
-            r"$\delta$ (mas)",
-            r"$\mu_\alpha \cos\delta$ (mas/yr)",
-            r"$\mu_\delta$ (mas/yr)",
-            r"$\varpi$ (mas)",
-            r"$a$",
-            r"$e$",
-            r"$i$",
-            r"$\omega$",
-            r"$\Omega$",
-            r"$t_\mathrm{p}$",
-            r"$M_1$",
-            r"$M_2$",
-        ]
+        range_select = np.full(self.n_params, 0.99)
 
         params = [
             r"$\alpha \cos\delta$",
@@ -96,14 +242,16 @@ class FitResults(ExoGaia):
             r"$\varpi$",
             r"$\mu_\alpha \cos\delta$",
             r"$\mu_\delta$",
-            r"$a$",
+            # r"$a$",
+            r"$\log{a/\mathrm{au}}$",
             r"$e$",
             r"$i$",
             r"$\omega$",
             r"$\Omega$",
             r"$t_\mathrm{p}$",
             r"$M_1$",
-            r"$M_2$",
+            # r"$M_2$",
+            r"$\log{M_2/M_\odot}$",
         ]
 
         units = [
@@ -123,7 +271,7 @@ class FitResults(ExoGaia):
         ]
 
         titles = []
-        for i in range(n_params):
+        for i in range(self.n_params):
             q_16, q_50, q_84 = np.percentile(post_samples[:, i], [16.0, 50.0, 84])
             q_minus, q_plus = q_50 - q_16, q_84 - q_50
 
@@ -144,7 +292,7 @@ class FitResults(ExoGaia):
             post_samples,
             truths=truths,
             truth_color="cornflowerblue",
-            labels=labels,
+            labels=self.labels,
             titles=titles,
             title_quantiles=title_quantiles,
             title_fmt=None,
@@ -163,17 +311,31 @@ class FitResults(ExoGaia):
             ax.yaxis.label.set_fontsize(15.0)
             ax.tick_params(axis="both", labelsize=13.0)
 
-        if output_file is None:
+        if plot_file is None:
             plt.show()
         else:
-            fig.savefig(output_file)
+            print(f"Output file: {plot_file}")
+            fig.savefig(plot_file)
 
         return fig
 
     @typechecked
-    def plot_residuals(self, output_file: str = None) -> Figure:
+    def plot_residuals(self, plot_file: str = None) -> Figure:
         """
-        Plot residuals
+        Function for plotting the residuals of the sample
+        that has the maximum likelihood.
+
+        Parameters
+        ----------
+        plot_file : str, None
+            File name for the output plot. The plot is shown
+            instead of stored if the arguments is set to ``None``.
+
+        Returns
+        -------
+        Figure
+            The Matplotlib ``Figure`` object that can be used
+            for further adjustments of the plot.
         """
 
         self.print_section("Plot residuals")
@@ -184,7 +346,6 @@ class FitResults(ExoGaia):
         obs_err = self.data_table["centroid_pos_error_al"]
 
         # Best sample
-        # best_params = np.median(self.samples, axis=0)
         max_idx = np.argmax(self.ln_like)
         best_params = self.samples[max_idx, :]
 
@@ -210,17 +371,30 @@ class FitResults(ExoGaia):
         plt.xlabel("Time (yr)")
         plt.ylabel("Residuals (mas)")
 
-        if output_file is None:
+        if plot_file is None:
             plt.show()
         else:
-            plt.savefig(output_file)
+            plt.savefig(plot_file)
 
         return fig
 
     @typechecked
-    def plot_orbit(self, output_file: str = None) -> Figure:
+    def plot_orbit(self, plot_file: str = None) -> Figure:
         """
-        Orbit plot
+        Function for plotting the stellar orbit based on the
+        parameters with the maximum likelihood.
+
+        Parameters
+        ----------
+        plot_file : str, None
+            File name for the output plot. The plot is shown
+            instead of stored if the arguments is set to ``None``.
+
+        Returns
+        -------
+        Figure
+            The Matplotlib ``Figure`` object that can be used
+            for further adjustments of the plot.
         """
 
         # Epoch astrometry data
@@ -228,7 +402,6 @@ class FitResults(ExoGaia):
         scan_ang = self.data_table["scan_pos_angle"]
 
         # Best sample
-        # best_params = np.median(self.samples, axis=0)
         max_idx = np.argmax(self.ln_like)
         best_params = self.samples[max_idx, :]
 
@@ -245,11 +418,6 @@ class FitResults(ExoGaia):
         residuals = bin_model.calc_residuals(best_params)
 
         self.print_section("Plot orbit")
-
-        res_ra, res_dec = (
-            np.sin(scan_ang) * residuals,
-            np.cos(scan_ang) * residuals,
-        )
 
         fig = plt.figure(figsize=(4, 4))
         ax = plt.gca()
@@ -314,9 +482,9 @@ class FitResults(ExoGaia):
         plt.xlim(lim_max, -lim_max)
         plt.ylim(-lim_max, lim_max)
 
-        if output_file is None:
+        if plot_file is None:
             plt.show()
         else:
-            plt.savefig(output_file)
+            plt.savefig(plot_file)
 
         return fig

@@ -1,5 +1,5 @@
 """
-Module with the ``BinaryModel`` class.
+Module with the ``StarModel`` and ``BinaryModel`` classes.
 """
 
 from typing import List, Optional, Tuple, Union
@@ -20,7 +20,7 @@ from exogaia.core import ExoGaia
 
 class StarModel(ExoGaia):
     """
-    Class for a star model.
+    Class with an astrometric model of a stellar track.
     """
 
     @typechecked
@@ -28,6 +28,15 @@ class StarModel(ExoGaia):
         self, star_param: Union[List[float], np.ndarray], epoch_astrometry
     ) -> None:
         """
+        Parameters
+        ----------
+        star_param : list(float), np.ndarray
+            List or array with the model parameters, in the following order:
+            RA (deg), Dec (deg), parallax (mas), RA proper motion (mas/yr),
+            Dec proper motion (mas/yr).
+        epoch_astrometry : EpochAstrometry
+            ``EpochAstrometry`` object that contains the data.
+
         Returns
         -------
         NoneType
@@ -56,17 +65,25 @@ class StarModel(ExoGaia):
     @typechecked
     def barycentric_position(self, obs_time: np.ndarray) -> CartesianRepresentation:
         """
+        Method for calculating the Cartesian position of the Gaia
+        satellite relative to the barycenter of the Solar System.
+
+        Parameters
+        ----------
+        obs_time : np.ndarray
+            Array with the observing epochs in Julian years.
+
         Returns
         -------
-        NoneType
-            None
+        CartesianRepresentation
+            Cartesian coordinates of the Gaia satellite at ``obs_time``.
         """
 
         bar_pos = get_body_barycentric(
             body="earth", time=Time(obs_time, format="jyear"), ephemeris=None
         )
 
-        # Gaia orbits in Lagrangian L2 of the Earth-Sun-Moon system
+        # Gaia orbits at Lagrangian L2 of the Earth-Sun-Moon system
         # https://en.wikipedia.org/wiki/Lagrange_point#L2
 
         mu = c.M_earth.value / (c.M_sun.value + c.M_earth.value)
@@ -78,10 +95,23 @@ class StarModel(ExoGaia):
         self, obs_time: Optional[np.ndarray] = None
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
+        Method for calculating the stellar track.
+
+        Parameters
+        ----------
+        obs_time : np.ndarray, None
+            Array with the observing epochs in Julian years. The
+            epochs are selected from the ``EpochAstrometry`` is
+            the argument is set to ``None``.
+
         Returns
         -------
-        NoneType
-            None
+        np.ndarray
+            Array with the RA coordinates (mas) relative to the
+            RA coordinate at ``ref_epoch``.
+        np.ndarray
+            Array with the Dec coordinates (mas) relative to the
+            Dec coordinate at ``ref_epoch``.
         """
 
         if obs_time is None:
@@ -143,12 +173,20 @@ class StarModel(ExoGaia):
 
 class BinaryModel(ExoGaia):
     """
-    Class for a binary model.
+    Class with an astrometric model of a binary system
+    with a dark companion.
     """
 
     @typechecked
     def __init__(self, epoch_astrometry, verbose: bool = True) -> None:
         """
+        Parameters
+        ----------
+        epoch_astrometry : EpochAstrometry
+            ``EpochAstrometry`` object that contains the data.
+        verbose : bool
+            Print some information.
+
         Returns
         -------
         NoneType
@@ -167,7 +205,27 @@ class BinaryModel(ExoGaia):
         obs_time: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Solve the Kepler equation
+        Method for solving the Kepler equation.
+
+        Parameters
+        ----------
+        period : float
+            Orbital period (days).
+        ecc : float
+            Eccentricity.
+        tau : float
+            Time of periastron relative to ``ref_epoch``.
+        obs_time : np.ndarray, None
+            Array with the observing epochs in Julian years. The
+            epochs are selected from the ``EpochAstrometry`` is
+            the argument is set to ``None``.
+
+        Returns
+        -------
+        np.ndarray
+            Array with :math:`x` coordinates (au) in the orbital plane.
+        np.ndarray
+            Array with :math:`y` coordinates (au) in the orbital plane.
         """
 
         if obs_time is None:
@@ -196,7 +254,29 @@ class BinaryModel(ExoGaia):
         self, sma: float, inc: float, aop: float, pan: float
     ) -> Tuple[float, float, float, float]:
         """
-        Thiele-Innes constants
+        Method for calculating the Thiele-Innes constants.
+
+        Parameters
+        ----------
+        sma : float
+            Semi-major axis (au).
+        inc : float
+            Inclination (deg).
+        aop : float
+            Argument of periastron (deg).
+        pan : float
+            Position angle of the ascending node (deg).
+
+        Returns
+        -------
+        float
+            Thiele-Innes A constant.
+        float
+            Thiele-Innes B constant.
+        float
+            Thiele-Innes F constant.
+        float
+            Thiele-Innes G constant.
         """
 
         thiele_innes_a = sma * (
@@ -224,7 +304,31 @@ class BinaryModel(ExoGaia):
         obs_time: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Orbit model
+        Method for calculating the orbital model.
+
+        Parameters
+        ----------
+        model_param : list(float), np.ndarray
+            List or array with the model parameters, in the following
+            order:  RA (deg), Dec (deg), parallax (mas), RA proper
+            motion (mas/yr), Dec proper motion (mas/yr), semi-major
+            axis (au), eccentricity, inclination (deg), argument of
+            periastron (rad), position angle of ascending node (rad),
+            relative time of periastron, primary mass (Msun),
+            secondary mass (Msun).
+        obs_time : np.ndarray, None
+            Array with the observing epochs in Julian years. The
+            epochs are selected from the ``EpochAstrometry`` is
+            the argument is set to ``None``.
+
+        Returns
+        -------
+        np.ndarray
+            Array with the RA coordinates (mas) relative to the
+            system's barycenter.
+        np.ndarray
+            Array with the Dec coordinates (mas) relative to the
+            system's barycenter.
         """
 
         sma, ecc, inc, aop, pan, tau, m1, m2 = model_param[5:13]
@@ -262,7 +366,29 @@ class BinaryModel(ExoGaia):
     @typechecked
     def calc_model(self, model_param: Union[List[float], np.ndarray]) -> np.ndarray:
         """
-        Binary model
+        Method for calculating the astrometry of the combined
+        stellar track and Kepler orbit.
+
+        Parameters
+        ----------
+        model_param : list(float), np.ndarray
+            List or array with the model parameters, in the following
+            order:  RA (deg), Dec (deg), parallax (mas), RA proper
+            motion (mas/yr), Dec proper motion (mas/yr), semi-major
+            axis (au), eccentricity, inclination (deg), argument of
+            periastron (rad), position angle of ascending node (rad),
+            relative time of periastron, primary mass (Msun),
+            secondary mass (Msun).
+        obs_time : np.ndarray, None
+            Array with the observing epochs in Julian years. The
+            epochs are selected from the ``EpochAstrometry`` is
+            the argument is set to ``None``.
+
+        Returns
+        -------
+        np.ndarray
+            Array with the 1D projected astrometry at the
+            observation epoch of ``EpochAstrometry``.
         """
 
         # Epoch astrometry data
@@ -316,7 +442,28 @@ class BinaryModel(ExoGaia):
     @typechecked
     def calc_residuals(self, model_param: Union[List[float], np.ndarray]) -> np.ndarray:
         """
-        Residuals
+        Method for calculating the residuals between model
+        astrometry and the epoch astrometry.
+
+        Parameters
+        ----------
+        model_param : list(float), np.ndarray
+            List or array with the model parameters, in the following
+            order:  RA (deg), Dec (deg), parallax (mas), RA proper
+            motion (mas/yr), Dec proper motion (mas/yr), semi-major
+            axis (au), eccentricity, inclination (deg), argument of
+            periastron (rad), position angle of ascending node (rad),
+            relative time of periastron, primary mass (Msun),
+            secondary mass (Msun).
+        obs_time : np.ndarray, None
+            Array with the observing epochs in Julian years. The
+            epochs are selected from the ``EpochAstrometry`` is
+            the argument is set to ``None``.
+
+        Returns
+        -------
+        np.ndarray
+            Array with the residuals, as data minus model.
         """
 
         # Binary model
@@ -358,7 +505,27 @@ class BinaryModel(ExoGaia):
         self, model_param: Union[List[float], np.ndarray], plot_file: str = None
     ) -> Figure:
         """
-        Orbit plot
+        Method for plotting the on-sky orbit.
+
+        Parameters
+        ----------
+        model_param : list(float), np.ndarray
+            List or array with the model parameters, in the following
+            order:  RA (deg), Dec (deg), parallax (mas), RA proper
+            motion (mas/yr), Dec proper motion (mas/yr), semi-major
+            axis (au), eccentricity, inclination (deg), argument of
+            periastron (rad), position angle of ascending node (rad),
+            relative time of periastron, primary mass (Msun),
+            secondary mass (Msun).
+        plot_file : str, None
+            File name for the output plot. The plot is shown
+            instead of stored if the arguments is set to ``None``.
+
+        Returns
+        -------
+        Figure
+            The Matplotlib ``Figure`` object that can be used
+            for further adjustments of the plot.
         """
 
         # Epoch astrometry data
