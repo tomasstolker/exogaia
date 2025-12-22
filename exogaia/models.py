@@ -381,7 +381,7 @@ class BinaryModel(ExoGaia):
             secondary mass (Msun).
         obs_time : np.ndarray, None
             Array with the observing epochs in Julian years. The
-            epochs are selected from the ``EpochAstrometry`` is
+            epochs are selected from the ``EpochAstrometry`` if
             the argument is set to ``None``.
 
         Returns
@@ -457,7 +457,7 @@ class BinaryModel(ExoGaia):
             secondary mass (Msun).
         obs_time : np.ndarray, None
             Array with the observing epochs in Julian years. The
-            epochs are selected from the ``EpochAstrometry`` is
+            epochs are selected from the ``EpochAstrometry`` if
             the argument is set to ``None``.
 
         Returns
@@ -502,7 +502,7 @@ class BinaryModel(ExoGaia):
 
     @typechecked
     def plot_orbit(
-        self, model_param: Union[List[float], np.ndarray], plot_file: str = None
+        self, model_param: Union[List[float], np.ndarray], plot_file: Optional[str] = None
     ) -> Figure:
         """
         Method for plotting the on-sky orbit.

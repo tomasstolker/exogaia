@@ -105,7 +105,7 @@ class FitResults(ExoGaia):
 
     @typechecked
     def plot_walkers(
-        self, n_walkers: int = 30, thin: Optional[int] = None, plot_file: str = None
+        self, n_walkers: int = 30, thin: Optional[int] = None, plot_file: Optional[str] = None
     ) -> Figure:
         """
         Function for plotting the tracks by the MCMC walkers.
@@ -163,7 +163,7 @@ class FitResults(ExoGaia):
                     lw=0.3,
                     marker="none",
                     color="tab:purple",
-                    alpha=0.1,
+                    alpha=0.3,
                 )
 
                 axs[param_idx].set_xlim(0.0, walk_track.size)
@@ -185,7 +185,7 @@ class FitResults(ExoGaia):
 
     @typechecked
     def plot_posterior(
-        self, truths: List[float] = None, plot_file: str = None
+        self, truths: List[float] = None, plot_file: Optional[str] = None
     ) -> Figure:
         """
         Function for plotting the posterior distributions.
@@ -222,6 +222,9 @@ class FitResults(ExoGaia):
 
         # Convert inc, aop, pan from rad to deg
         post_samples[:, 7:10] = np.degrees(post_samples[:, 7:10])
+        truths[7] = np.degrees(truths[7])
+        truths[8] = np.degrees(truths[8])
+        truths[9] = np.degrees(truths[9])
 
         # Quantiles for the 1D distributions (-1, 1 sigma)
         quantiles = [norm.cdf(n_sigma) for n_sigma in [-1, 1]]
@@ -320,7 +323,7 @@ class FitResults(ExoGaia):
         return fig
 
     @typechecked
-    def plot_residuals(self, plot_file: str = None) -> Figure:
+    def plot_residuals(self, plot_file: Optional[str] = None) -> Figure:
         """
         Function for plotting the residuals of the sample
         that has the maximum likelihood.
@@ -379,7 +382,7 @@ class FitResults(ExoGaia):
         return fig
 
     @typechecked
-    def plot_orbit(self, plot_file: str = None) -> Figure:
+    def plot_orbit(self, plot_file: Optional[str] = None) -> Figure:
         """
         Function for plotting the stellar orbit based on the
         parameters with the maximum likelihood.

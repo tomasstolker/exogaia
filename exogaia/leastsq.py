@@ -1,5 +1,5 @@
 """
-Module with the ``exogaia`` tool.
+Module with the ``LeastSquares`` class.
 """
 
 from typing import Optional, Tuple
@@ -25,12 +25,17 @@ from exogaia.models import BinaryModel, StarModel
 
 class LeastSquares(ExoGaia):
     """
-    Class for least-squares fit of epoch astrometry.
+    Class for least-squares model fit of epoch astrometry.
     """
 
     @typechecked
     def __init__(self, epoch_astrometry: EpochAstrometry = None) -> None:
         """
+        Parameters
+        ----------
+        epoch_astrometry : EpochAstrometry
+            ``EpochAstrometry`` object that contains the data.
+
         Returns
         -------
         NoneType
@@ -53,8 +58,19 @@ class LeastSquares(ExoGaia):
         verbose: bool = True,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         """
-        Method for calculating the least-squares for an input design
-        matrix and the Gaia epoch astrometry.
+        Method for calculating a least-squares fit for a given
+        design matrix and 1D position measurements.
+
+        Parameters
+        ----------
+        design : np.ndarray
+            Array with the design matrix for the linear fit.
+        obs_pos : np.ndarray, None
+            Array with the 1D astrometric measurements in mas. The
+            position measurements are selected from the
+            ``EpochAstrometry`` if  the argument is set to ``None``.
+        verbose : bool
+            Print some information (default: False).
         """
 
         # Epoch astrometry data

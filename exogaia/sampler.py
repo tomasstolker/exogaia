@@ -1009,6 +1009,7 @@ class MCMCSampler(ExoGaia):
         pickle_file: str = "exogaia.pkl",
         n_walkers: int = 200,
         n_steps: int = 1000,
+        progress: bool = False,
     ) -> None:
         """
         Method for running the MCMC ensemble sampler of ``emcee``.
@@ -1022,6 +1023,8 @@ class MCMCSampler(ExoGaia):
             Number of walkers that will explore the posterior landscape.
         n_steps : int
             Number of steps that each walker will make.
+        progress : bool
+            Display progress bar (default: False).
 
         Returns
         -------
@@ -1039,7 +1042,7 @@ class MCMCSampler(ExoGaia):
         for param_item, param_idx in self.param_indices.items():
             init_pos[:, param_idx] = self.priors[param_item].draw_samples(n_walkers)
 
-        sampler.run_mcmc(initial_state=init_pos, nsteps=n_steps, progress=True)
+        sampler.run_mcmc(initial_state=init_pos, nsteps=n_steps, progress=progress)
 
         sampler.get_autocorr_time(quiet=True)
 
@@ -1069,6 +1072,7 @@ class MCMCSampler(ExoGaia):
         n_walkers: int = 200,
         n_steps: int = 1000,
         n_sweeps: int = 10,
+        progress: bool = False,
     ) -> None:
         """
         Method for running the adaptive parallel tempering tempered
@@ -1087,6 +1091,8 @@ class MCMCSampler(ExoGaia):
             Number of steps that each walker will make.
         n_sweeps : int
             Number of sweeps to run.
+        progress : bool
+            Display progress bar (default: False).
 
         Returns
         -------
@@ -1107,7 +1113,7 @@ class MCMCSampler(ExoGaia):
             init_pos[:, :, param_idx] = self.priors[param_item].draw_samples(n_walkers)
 
         sampler.run_mcmc(
-            initial_state=init_pos, nsteps=n_steps, nsweeps=n_sweeps, progress=True
+            initial_state=init_pos, nsteps=n_steps, nsweeps=n_sweeps, progress=progress
         )
 
         sampler.get_autocorr_time(quiet=True)

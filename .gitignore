@@ -3,6 +3,7 @@
 docs/_build/
 docs/.ipynb_checkpoints/
 docs/multinest/
+docs/exogaia.pkl
 docs/*.png
 docs/*.csv
 build/

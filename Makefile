@@ -40,14 +40,13 @@ clean:
 	find . -name '__pycache__' -exec rm -rf {} +
 	rm -f .coverage*
 	rm -f coverage.xml
-	rm -f docs/calib_*
-	rm -f docs/target_*
 	rm -rf .pytest_cache/
 	rm -rf docs/_build/
 	rm -rf docs/.ipynb_checkpoints/
 	rm -rf docs/multinest/
-	rm -rf docs/*.png
-	rm -rf docs/*.csv
+	rm -f docs/*.png
+	rm -f docs/*.csv
+	rm -f docs/exogaia.pkl
 	rm -rf build/
 	rm -rf dist/
 	rm -rf exogaia.egg-info/
