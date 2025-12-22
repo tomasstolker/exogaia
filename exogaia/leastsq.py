@@ -71,6 +71,17 @@ class LeastSquares(ExoGaia):
             ``EpochAstrometry`` if  the argument is set to ``None``.
         verbose : bool
             Print some information (default: False).
+
+        Returns
+        -------
+        np.ndarray
+            Array with the best-fit model astrometry.
+        np.ndarray
+            Array with the best-fit parameters
+        np.ndarray
+            Array with the parameter uncertainties.
+        float
+            RUWE of the fit.
         """
 
         # Epoch astrometry data
@@ -94,7 +105,11 @@ class LeastSquares(ExoGaia):
         # best_param = cho_solve(cho_fac, b_matrix)
         # best_model = design @ best_param
 
-        # Solves TODO
+        # Linear model: obs_pos = design x best_param
+        # Minimize weighted chi^2: chi^2 = (y - A theta)^T C^-1 (y - A theta)
+        # y = obs_pos, A = design, theta = params
+        # Setting delta_chi^2/delta_theta = 0
+        # Solution: theta = (A^T C^-1 A)^-1 A^T C^-1 y
         best_param = np.linalg.solve(
             design.T @ self.inv_cov @ design, design.T @ self.inv_cov @ obs_pos
         )
@@ -139,10 +154,28 @@ class LeastSquares(ExoGaia):
 
     @typechecked
     def singl_5param(
-        self, plot_residuals: Optional[str] = None
+        self, plot_file: Optional[str] = None
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         """
-        Fit epoch astrometry with a 5-parameter model.
+        Method for a least-squares fit of the the epoch astrometry
+        with a 5-parameter model for a single star.
+
+        Parameters
+        ----------
+        plot_file : str, None
+            File name of the plot with the results. No plot
+            is created when the argument is set to ``None``.
+
+        Returns
+        -------
+        np.ndarray
+            Array with the best-fit model astrometry.
+        np.ndarray
+            Array with the best-fit parameters
+        np.ndarray
+            Array with the parameter uncertainties.
+        float
+            RUWE of the fit.
         """
 
         self.print_section("Single star (5-parameters)")
@@ -190,7 +223,7 @@ class LeastSquares(ExoGaia):
 
         # Create plot with residuals
 
-        if plot_residuals is not None:
+        if plot_file is not None:
             _, axs = plt.subplots(1, 2, figsize=(14, 4), gridspec_kw={"wspace": -0.05})
 
             axs[0].set_aspect("equal", adjustable="box")
@@ -314,16 +347,35 @@ class LeastSquares(ExoGaia):
                 fontsize=12,
             )
 
-            plt.savefig(plot_residuals)
+            plt.savefig(plot_file)
 
         return best_model, best_param, param_sig, ruwe
 
     @typechecked
     def accel_7param(
-        self, plot_residuals: Optional[str] = None
+        self, plot_file: Optional[str] = None
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         """
-        Fit epoch astrometry with a 7-parameter model.
+        Method for a least-squares fit of the the epoch astrometry
+        with a 7-parameter model for a star with a proper motion
+        acceleration.
+
+        Parameters
+        ----------
+        plot_file : str, None
+            File name of the plot with the results. No plot
+            is created when the argument is set to ``None``.
+
+        Returns
+        -------
+        np.ndarray
+            Array with the best-fit model astrometry.
+        np.ndarray
+            Array with the best-fit parameters
+        np.ndarray
+            Array with the parameter uncertainties.
+        float
+            RUWE of the fit.
         """
 
         self.print_section("Binary star (7-parameters)")
@@ -401,7 +453,7 @@ class LeastSquares(ExoGaia):
 
         # Create plot with residuals
 
-        if plot_residuals is not None:
+        if plot_file is not None:
             _, axs = plt.subplots(1, 3, figsize=(18, 4), gridspec_kw={"wspace": 0.25})
 
             # axs[0].set_aspect("equal", adjustable="box")
@@ -623,16 +675,35 @@ class LeastSquares(ExoGaia):
                 fontsize=12,
             )
 
-            plt.savefig(plot_residuals)
+            plt.savefig(plot_file)
 
         return best_model, best_param, param_sig, ruwe
 
     @typechecked
     def accel_9param(
-        self, plot_residuals: Optional[str] = None
+        self, plot_file: Optional[str] = None
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         """
-        Fit epoch astrometry with a 9-parameter model.
+        Method for a least-squares fit of the the epoch astrometry
+        with a 9-parameter model for a star with a proper motion
+        acceleration and second-order derivative.
+
+        Parameters
+        ----------
+        plot_file : str, None
+            File name of the plot with the results. No plot
+            is created when the argument is set to ``None``.
+
+        Returns
+        -------
+        np.ndarray
+            Array with the best-fit model astrometry.
+        np.ndarray
+            Array with the best-fit parameters
+        np.ndarray
+            Array with the parameter uncertainties.
+        float
+            RUWE of the fit.
         """
 
         self.print_section("Binary star (9-parameters)")
@@ -718,7 +789,7 @@ class LeastSquares(ExoGaia):
 
         # Create plot with residuals
 
-        if plot_residuals is not None:
+        if plot_file is not None:
             _, axs = plt.subplots(1, 3, figsize=(18, 4), gridspec_kw={"wspace": 0.25})
 
             # axs[0].set_aspect("equal", adjustable="box")
@@ -943,13 +1014,33 @@ class LeastSquares(ExoGaia):
                 fontsize=12,
             )
 
-            plt.savefig(plot_residuals)
+            plt.savefig(plot_file)
 
         return best_model, best_param, param_sig, ruwe
 
-    def orbit_grid(self, plot_grid: Optional[str] = None) -> Figure:
+    def orbit_grid(self, plot_file: Optional[str] = None) -> Figure:
         """
-        Orbit grid
+        Method for exploring a grid of orbits of varying semi-major
+        axis, eccentricity, and time of periastron. The semi-major
+        axis is converted in a period, using the ``primary_mass``
+        from the ``EpochAstrometry`` and ignoring the secondary mass.
+        For each combination, the Kepler equation is solved. The other
+        parameters (RA, Dec, parallax, proper motion, Thiele-Innes
+        constants) are all linear and optimized with a least-squares.
+        The output plot shows the RUWE for each semi-major axis and
+        eccentricity pair, with the time of periastron selected that
+        minimizes the RUWE.
+
+        Parameters
+        ----------
+        plot_file : str, None
+            File name of the plot with the results. No plot
+            is created when the argument is set to ``None``.
+
+        Returns
+        -------
+        Figure
+            Matplotlib ``Figure`` object.
         """
 
         self.print_section("Orbit (12-parameters)")
@@ -964,14 +1055,12 @@ class LeastSquares(ExoGaia):
 
         # Grid for the log10(a/au)
         loga_list = np.linspace(np.log10(0.1), np.log10(30.0), 50)
-        # loga_list = np.linspace(1.0, 3.0, 3)
 
         # Grid for the eccentricity
         ecc_list = np.linspace(0.0, 1.0, 50, endpoint=False)
 
         # Grid for the relative time of periastron
         tau_list = np.linspace(0.0, 0.1, 50, endpoint=False)
-        # tau_list = np.array([0.0, 0.001])
 
         binary_model = BinaryModel(
             epoch_astrometry=self.epoch_astrometry, verbose=False
@@ -992,7 +1081,6 @@ class LeastSquares(ExoGaia):
                 for tau_idx, tau_item in enumerate(tau_list):
                     # Semi-major axis (au)
                     sma = 10.0**loga_item
-                    # sma = loga_item
 
                     # Primary mass, ignore secondary mass (Msun)
                     m1 = self.primary_mass[0]
@@ -1159,9 +1247,9 @@ class LeastSquares(ExoGaia):
         ax.set_ylabel(r"Eccentricity")
         ax.set_xscale("log")
 
-        if plot_grid is None:
+        if plot_file is None:
             plt.show()
         else:
-            plt.savefig(plot_grid)
+            plt.savefig(plot_file)
 
         return fig

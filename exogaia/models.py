@@ -502,7 +502,9 @@ class BinaryModel(ExoGaia):
 
     @typechecked
     def plot_orbit(
-        self, model_param: Union[List[float], np.ndarray], plot_file: Optional[str] = None
+        self,
+        model_param: Union[List[float], np.ndarray],
+        plot_file: Optional[str] = None,
     ) -> Figure:
         """
         Method for plotting the on-sky orbit.

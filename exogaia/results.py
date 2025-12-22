@@ -105,7 +105,10 @@ class FitResults(ExoGaia):
 
     @typechecked
     def plot_walkers(
-        self, n_walkers: int = 30, thin: Optional[int] = None, plot_file: Optional[str] = None
+        self,
+        n_walkers: int = 30,
+        thin: Optional[int] = None,
+        plot_file: Optional[str] = None,
     ) -> Figure:
         """
         Function for plotting the tracks by the MCMC walkers.

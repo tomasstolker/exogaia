@@ -279,18 +279,9 @@ class NestedSampler(ExoGaia):
             None
         """
 
+        import pymultinest
+
         self.print_section("Orbit fit with MultiNest")
-
-        try:
-            import pymultinest
-
-        except:
-            warnings.warn(
-                "PyMultiNest could not be imported. "
-                "Perhaps because MultiNest was not built "
-                "and/or found at the LD_LIBRARY_PATH "
-                "(Linux) or DYLD_LIBRARY_PATH (Mac)?"
-            )
 
         self.output_folder = output_folder
 
