@@ -234,7 +234,7 @@ class EpochAstrometry(ExoGaia):
             List with model parameters, as RA (deg), Dec (deg),
             parallax (mas), RA proper motion (mas/yr), Dec proper
             motion (mas/yr). For a binary system, followed by
-            semi-major axis (au), eccentricity, inclination (deg),
+            semi-major axis (au), eccentricity, inclination (rad),
             argument of periastron (rad), position angle of
             ascending node (rad), relative time of periastron,
             primary mass (Msun), secondary mass (Msun).

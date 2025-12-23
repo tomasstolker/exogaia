@@ -280,11 +280,11 @@ class BinaryModel(ExoGaia):
         sma : float
             Semi-major axis (au).
         inc : float
-            Inclination (deg).
+            Inclination (rad).
         aop : float
-            Argument of periastron (deg).
+            Argument of periastron (rad).
         pan : float
-            Position angle of the ascending node (deg).
+            Position angle of the ascending node (rad).
 
         Returns
         -------
@@ -331,7 +331,7 @@ class BinaryModel(ExoGaia):
             List or array with the model parameters, in the following
             order:  RA (deg), Dec (deg), parallax (mas), RA proper
             motion (mas/yr), Dec proper motion (mas/yr), semi-major
-            axis (au), eccentricity, inclination (deg), argument of
+            axis (au), eccentricity, inclination (rad), argument of
             periastron (rad), position angle of ascending node (rad),
             relative time of periastron, primary mass (Msun),
             secondary mass (Msun).
@@ -394,7 +394,7 @@ class BinaryModel(ExoGaia):
             List or array with the model parameters, in the following
             order:  RA (deg), Dec (deg), parallax (mas), RA proper
             motion (mas/yr), Dec proper motion (mas/yr), semi-major
-            axis (au), eccentricity, inclination (deg), argument of
+            axis (au), eccentricity, inclination (rad), argument of
             periastron (rad), position angle of ascending node (rad),
             relative time of periastron, primary mass (Msun),
             secondary mass (Msun).
@@ -470,7 +470,7 @@ class BinaryModel(ExoGaia):
             List or array with the model parameters, in the following
             order:  RA (deg), Dec (deg), parallax (mas), RA proper
             motion (mas/yr), Dec proper motion (mas/yr), semi-major
-            axis (au), eccentricity, inclination (deg), argument of
+            axis (au), eccentricity, inclination (rad), argument of
             periastron (rad), position angle of ascending node (rad),
             relative time of periastron, primary mass (Msun),
             secondary mass (Msun).
@@ -534,7 +534,7 @@ class BinaryModel(ExoGaia):
             List or array with the model parameters, in the following
             order:  RA (deg), Dec (deg), parallax (mas), RA proper
             motion (mas/yr), Dec proper motion (mas/yr), semi-major
-            axis (au), eccentricity, inclination (deg), argument of
+            axis (au), eccentricity, inclination (rad), argument of
             periastron (rad), position angle of ascending node (rad),
             relative time of periastron, primary mass (Msun),
             secondary mass (Msun).

@@ -219,7 +219,9 @@ class LeastSquares(ExoGaia):
         )
 
         time_full = np.linspace(self.time_start.jyear, self.time_end.jyear, 1000)
-        delta_ra_full, delta_dec_full, _ = star_model.calc_model(model_param=best_param, obs_time=time_full)
+        delta_ra_full, delta_dec_full, _ = star_model.calc_model(
+            model_param=best_param, obs_time=time_full
+        )
 
         # Create plot with residuals
 
@@ -275,9 +277,9 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"RA = {best_param[0]:.3f} $\pm$ {param_sig[0]:.3f} deg" + "\n"
-                rf"Dec = {best_param[1]:.3f} $\pm$ {param_sig[1]:.3f} deg" + "\n"
-                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas/yr"
+                rf"RA = {best_param[0]:.3f} deg $\pm$ {param_sig[0]:.3f} mas" + "\n"
+                rf"Dec = {best_param[1]:.3f} deg $\pm$ {param_sig[1]:.3f} mas" + "\n"
+                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas"
                 + "\n"
                 rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
@@ -329,8 +331,8 @@ class LeastSquares(ExoGaia):
                 zorder=2,
             )
 
-            axs[0].set_xlabel(r"$\alpha$ (deg)")
-            axs[0].set_ylabel(r"$\delta$ (deg)")
+            axs[0].set_xlabel(r"$\Delta\alpha$ (mas)")
+            axs[0].set_ylabel(r"$\Delta\delta$ (mas)")
             axs[0].invert_xaxis()
 
             axs[1].set_xlabel("Time (yr)")
@@ -417,10 +419,10 @@ class LeastSquares(ExoGaia):
         print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
         print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
         print(
-            f"   - dmu/dt in RA (mas/yr^2) = {best_param[5]:.3f} +/- {param_sig[5]:.3f}"
+            f"   - dmu/dt in RA = {best_param[5]:.3f} +/- {param_sig[5]:.3f} mas/yr^2"
         )
         print(
-            f"   - dmu/dt in Dec (mas/yr^2) = {best_param[6]:.3f} +/- {param_sig[6]:.3f}"
+            f"   - dmu/dt in Dec = {best_param[6]:.3f} +/- {param_sig[6]:.3f} mas/yr^2"
         )
 
         # Stellar track
@@ -432,7 +434,9 @@ class LeastSquares(ExoGaia):
         )
 
         time_full = np.linspace(self.time_start.jyear, self.time_end.jyear, 1000)
-        delta_ra_full, delta_dec_full, _ = star_model.calc_model(model_param=best_param, obs_time=time_full)
+        delta_ra_full, delta_dec_full, _ = star_model.calc_model(
+            model_param=best_param, obs_time=time_full
+        )
 
         # Stellar track, without acceleration
 
@@ -506,9 +510,9 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"RA = {best_param[0]:.3f} $\pm$ {param_sig[0]:.3f} deg" + "\n"
-                rf"Dec = {best_param[1]:.3f} $\pm$ {param_sig[1]:.3f} deg" + "\n"
-                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas/yr"
+                rf"RA = {best_param[0]:.3f} deg $\pm$ {param_sig[0]:.3f} mas" + "\n"
+                rf"Dec = {best_param[1]:.3f} deg $\pm$ {param_sig[1]:.3f} mas" + "\n"
+                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas"
                 + "\n"
                 rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
@@ -747,16 +751,16 @@ class LeastSquares(ExoGaia):
         print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
         print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
         print(
-            f"   - dmu/dt in RA (mas/yr^2) = {best_param[5]:.3f} +/- {param_sig[5]:.3f}"
+            f"   - dmu/dt in RA = {best_param[5]:.3f} +/- {param_sig[5]:.3f} mas/yr^2"
         )
         print(
-            f"   - dmu/dt in Dec (mas/yr^2) = {best_param[6]:.3f} +/- {param_sig[6]:.3f}"
+            f"   - dmu/dt in Dec = {best_param[6]:.3f} +/- {param_sig[6]:.3f} mas/yr^2"
         )
         print(
-            f"   - d^2mu/d^2t in RA (mas/yr^3) = {best_param[7]:.3f} +/- {param_sig[7]:.3f}"
+            f"   - d^2mu/d^2t in RA = {best_param[7]:.3f} +/- {param_sig[7]:.3f} mas/yr^3"
         )
         print(
-            f"   - d^2mu/d^2t in Dec (mas/yr^3) = {best_param[8]:.3f} +/- {param_sig[8]:.3f}"
+            f"   - d^2mu/d^2t in Dec = {best_param[8]:.3f} +/- {param_sig[8]:.3f} mas/yr^3"
         )
 
         # Stellar track
@@ -768,7 +772,9 @@ class LeastSquares(ExoGaia):
         )
 
         time_full = np.linspace(self.time_start.jyear, self.time_end.jyear, 1000)
-        delta_ra_full, delta_dec_full, _ = star_model.calc_model(model_param=best_param, obs_time=time_full)
+        delta_ra_full, delta_dec_full, _ = star_model.calc_model(
+            model_param=best_param, obs_time=time_full
+        )
 
         # Stellar track, without acceleration
 
@@ -841,9 +847,9 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"RA = {best_param[0]:.3f} $\pm$ {param_sig[0]:.3f} deg" + "\n"
-                rf"Dec = {best_param[1]:.3f} $\pm$ {param_sig[1]:.3f} deg" + "\n"
-                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas/yr"
+                rf"RA = {best_param[0]:.3f} deg $\pm$ {param_sig[0]:.3f} mas" + "\n"
+                rf"Dec = {best_param[1]:.3f} deg $\pm$ {param_sig[1]:.3f} mas" + "\n"
+                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas"
                 + "\n"
                 rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
@@ -1159,9 +1165,7 @@ class LeastSquares(ExoGaia):
         print(f"   - RA = {global_param[0]:.3f} deg +/- {global_sigma[0]:.3f} mas")
         print(f"   - Dec = {global_param[1]:.3f} deg +/- {global_sigma[1]:.3f} mas")
         print(f"   - Parallax = {global_param[2]:.3f} +/- {global_sigma[2]:.3f} mas")
-        print(
-            f"   - mu in RA = {global_param[3]:.3f} +/- {global_sigma[3]:.3f} mas/yr"
-        )
+        print(f"   - mu in RA = {global_param[3]:.3f} +/- {global_sigma[3]:.3f} mas/yr")
         print(
             f"   - mu in Dec = {global_param[4]:.3f} +/- {global_sigma[4]:.3f} mas/yr"
         )
