@@ -24,16 +24,10 @@ class StarModel(ExoGaia):
     """
 
     @typechecked
-    def __init__(
-        self, star_param: Union[List[float], np.ndarray], epoch_astrometry
-    ) -> None:
+    def __init__(self, epoch_astrometry) -> None:
         """
         Parameters
         ----------
-        star_param : list(float), np.ndarray
-            List or array with the model parameters, in the following order:
-            RA (deg), Dec (deg), parallax (mas), RA proper motion (mas/yr),
-            Dec proper motion (mas/yr).
         epoch_astrometry : EpochAstrometry
             ``EpochAstrometry`` object that contains the data.
 
@@ -42,22 +36,6 @@ class StarModel(ExoGaia):
         NoneType
             None
         """
-
-        self.n_param = len(star_param)
-
-        self.ra_coord = star_param[0]
-        self.dec_coord = star_param[1]
-        self.parallax = star_param[2]
-        self.pm_ra = star_param[3]
-        self.pm_dec = star_param[4]
-
-        if len(star_param) > 5:
-            self.pmdot_ra = star_param[5]
-            self.pmdot_dec = star_param[6]
-
-        if len(star_param) > 7:
-            self.pmdotdot_ra = star_param[7]
-            self.pmdotdot_dec = star_param[8]
 
         self.data_table = epoch_astrometry.data_table
         self.ref_epoch = epoch_astrometry.ref_epoch
@@ -92,13 +70,19 @@ class StarModel(ExoGaia):
 
     @typechecked
     def calc_model(
-        self, obs_time: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        self,
+        model_param: Union[List[float], np.ndarray],
+        obs_time: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
         """
         Method for calculating the stellar track.
 
         Parameters
         ----------
+        model_param : list(float), np.ndarray
+            List or array with the model parameters, in the following order:
+            RA (deg), Dec (deg), parallax (mas), RA proper motion (mas/yr),
+            Dec proper motion (mas/yr).
         obs_time : np.ndarray, None
             Array with the observing epochs in Julian years. The
             epochs are selected from the ``EpochAstrometry`` is
@@ -112,23 +96,52 @@ class StarModel(ExoGaia):
         np.ndarray
             Array with the Dec coordinates (mas) relative to the
             Dec coordinate at ``ref_epoch``.
+        np.ndarray
+            Array with the 1D projected positions (mas). Will only
+            be returned if the size of ``obs_time`` is equal to the
+            size of ``self.data_table["scan_pos_angle"]``.
         """
 
         if obs_time is None:
             obs_time = self.data_table["obs_time_tcb"].to_numpy()
 
+        scan_ang = self.data_table["scan_pos_angle"].to_numpy()
+
+        n_param = len(model_param)
+
+        ra_coord = model_param[0]
+        dec_coord = model_param[1]
+        parallax = model_param[2]
+        pm_ra = model_param[3]
+        pm_dec = model_param[4]
+
+        if len(model_param) > 5:
+            pmdot_ra = model_param[5]
+            pmdot_dec = model_param[6]
+        else:
+            pmdot_ra = None
+            pmdot_dec = None
+
+        if len(model_param) > 7:
+            pmdotdot_ra = model_param[7]
+            pmdotdot_dec = model_param[8]
+
+        else:
+            pmdotdot_ra = None
+            pmdotdot_dec = None
+
         gaia_pos = self.barycentric_position(obs_time)
         gaia_pos = gaia_pos.xyz.to_value()
 
         alpha_hat = np.array(
-            [-np.sin(np.radians(self.ra_coord)), np.cos(np.radians(self.ra_coord)), 0.0]
+            [-np.sin(np.radians(ra_coord)), np.cos(np.radians(ra_coord)), 0.0]
         )
 
         delta_hat = np.array(
             [
-                -np.cos(np.radians(self.ra_coord)) * np.sin(np.radians(self.dec_coord)),
-                -np.sin(np.radians(self.ra_coord)) * np.sin(np.radians(self.dec_coord)),
-                np.cos(np.radians(self.dec_coord)),
+                -np.cos(np.radians(ra_coord)) * np.sin(np.radians(dec_coord)),
+                -np.sin(np.radians(ra_coord)) * np.sin(np.radians(dec_coord)),
+                np.cos(np.radians(dec_coord)),
             ]
         )
 
@@ -148,27 +161,33 @@ class StarModel(ExoGaia):
             ]
         )
 
-        params_ra = [self.ra_coord, self.parallax, self.pm_ra]
-        params_dec = [self.dec_coord, self.parallax, self.pm_dec]
+        params_ra = [ra_coord, parallax, pm_ra]
+        params_dec = [dec_coord, parallax, pm_dec]
 
         delta_ra = design_ra @ params_ra
         delta_dec = design_dec @ params_dec
 
-        if self.n_param in [7, 9]:
-            delta_ra += 0.5 * (obs_time - self.ref_epoch.value) ** 2 * self.pmdot_ra
+        if n_param in [7, 9]:
+            delta_ra += 0.5 * (obs_time - self.ref_epoch.value) ** 2 * pmdot_ra
 
-            delta_dec += 0.5 * (obs_time - self.ref_epoch.value) ** 2 * self.pmdot_dec
+            delta_dec += 0.5 * (obs_time - self.ref_epoch.value) ** 2 * pmdot_dec
 
-        if self.n_param == 9:
+        if n_param == 9:
             delta_ra += (
-                (1.0 / 6.0) * (obs_time - self.ref_epoch.value) ** 3 * self.pmdotdot_ra
+                (1.0 / 6.0) * (obs_time - self.ref_epoch.value) ** 3 * pmdotdot_ra
             )
 
             delta_dec += (
-                (1.0 / 6.0) * (obs_time - self.ref_epoch.value) ** 3 * self.pmdotdot_dec
+                (1.0 / 6.0) * (obs_time - self.ref_epoch.value) ** 3 * pmdotdot_dec
             )
 
-        return delta_ra - self.ra_coord, delta_dec - self.dec_coord
+        # Calculate 1D projected positions
+        if scan_ang.size == delta_ra.size and scan_ang.size == delta_dec.size:
+            delta_pos = delta_ra * np.sin(scan_ang) + delta_dec * np.cos(scan_ang)
+        else:
+            delta_pos = None
+
+        return delta_ra - ra_coord, delta_dec - dec_coord, delta_pos
 
 
 class BinaryModel(ExoGaia):

@@ -206,20 +206,20 @@ class LeastSquares(ExoGaia):
         res_ra, res_dec = np.sin(scan_ang) * residuals, np.cos(scan_ang) * residuals
 
         print("\nBest-fit parameters:")
-        print(f"   - RA (deg) = {best_param[0]:.3f} +/- {param_sig[0]:.3f}")
-        print(f"   - Dec (deg) = {best_param[1]:.3f} +/- {param_sig[1]:.3f}")
-        print(f"   - Parallax (mas) = {best_param[2]:.3f} +/- {param_sig[2]:.3f}")
-        print(f"   - mu in RA (mas/yr) = {best_param[3]:.3f} +/- {param_sig[3]:.3f}")
-        print(f"   - mu in Dec (mas/yr) = {best_param[4]:.3f} +/- {param_sig[4]:.3f}")
+        print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
+        print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
+        print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
+        print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
+        print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
 
-        star_model = StarModel(
-            star_param=best_param, epoch_astrometry=self.epoch_astrometry
+        star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
+
+        delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
+            model_param=best_param, obs_time=None
         )
 
-        delta_ra_obs, delta_dec_obs = star_model.calc_model(obs_time=None)
-
         time_full = np.linspace(self.time_start.jyear, self.time_end.jyear, 1000)
-        delta_ra_full, delta_dec_full = star_model.calc_model(obs_time=time_full)
+        delta_ra_full, delta_dec_full, _ = star_model.calc_model(model_param=best_param, obs_time=time_full)
 
         # Create plot with residuals
 
@@ -411,11 +411,11 @@ class LeastSquares(ExoGaia):
         )
 
         print("\nBest-fit parameters:")
-        print(f"   - RA (deg) = {best_param[0]:.3f} +/- {param_sig[0]:.3f}")
-        print(f"   - Dec (mas) = {best_param[1]:.3f} +/- {param_sig[1]:.3f}")
-        print(f"   - Parallax (mas) = {best_param[2]:.3f} +/- {param_sig[2]:.3f}")
-        print(f"   - mu in RA (mas/yr) = {best_param[3]:.3f} +/- {param_sig[3]:.3f}")
-        print(f"   - mu in Dec (mas/yr) = {best_param[4]:.3f} +/- {param_sig[4]:.3f}")
+        print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
+        print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
+        print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
+        print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
+        print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
         print(
             f"   - dmu/dt in RA (mas/yr^2) = {best_param[5]:.3f} +/- {param_sig[5]:.3f}"
         )
@@ -425,25 +425,25 @@ class LeastSquares(ExoGaia):
 
         # Stellar track
 
-        star_model = StarModel(
-            star_param=best_param, epoch_astrometry=self.epoch_astrometry
+        star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
+
+        delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
+            model_param=best_param, obs_time=None
         )
 
-        delta_ra_obs, delta_dec_obs = star_model.calc_model(obs_time=None)
-
         time_full = np.linspace(self.time_start.jyear, self.time_end.jyear, 1000)
-        delta_ra_full, delta_dec_full = star_model.calc_model(obs_time=time_full)
+        delta_ra_full, delta_dec_full, _ = star_model.calc_model(model_param=best_param, obs_time=time_full)
 
         # Stellar track, without acceleration
 
-        star_no_accel = StarModel(
-            star_param=best_param[:5], epoch_astrometry=self.epoch_astrometry
+        star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
+
+        delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_model(
+            model_param=best_param[:5], obs_time=None
         )
 
-        delta_ra_no_accel, delta_dec_no_accel = star_no_accel.calc_model(obs_time=None)
-
-        delta_ra_no_accel_full, delta_dec_no_accel_full = star_no_accel.calc_model(
-            obs_time=time_full
+        delta_ra_no_accel_full, delta_dec_no_accel_full, _ = star_no_accel.calc_model(
+            model_param=best_param[:5], obs_time=time_full
         )
 
         # Acceleration
@@ -741,11 +741,11 @@ class LeastSquares(ExoGaia):
         )
 
         print("\nBest-fit parameters:")
-        print(f"   - RA (deg) = {best_param[0]:.3f} +/- {param_sig[0]:.3f}")
-        print(f"   - Dec (deg) = {best_param[1]:.3f} +/- {param_sig[1]:.3f}")
-        print(f"   - Parallax (mas) = {best_param[2]:.3f} +/- {param_sig[2]:.3f}")
-        print(f"   - mu in RA (mas/yr) = {best_param[3]:.3f} +/- {param_sig[3]:.3f}")
-        print(f"   - mu in Dec (mas/yr) = {best_param[4]:.3f} +/- {param_sig[4]:.3f}")
+        print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
+        print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
+        print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
+        print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
+        print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
         print(
             f"   - dmu/dt in RA (mas/yr^2) = {best_param[5]:.3f} +/- {param_sig[5]:.3f}"
         )
@@ -761,25 +761,25 @@ class LeastSquares(ExoGaia):
 
         # Stellar track
 
-        star_model = StarModel(
-            star_param=best_param, epoch_astrometry=self.epoch_astrometry
+        star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
+
+        delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
+            model_param=best_param, obs_time=None
         )
 
-        delta_ra_obs, delta_dec_obs = star_model.calc_model(obs_time=None)
-
         time_full = np.linspace(self.time_start.jyear, self.time_end.jyear, 1000)
-        delta_ra_full, delta_dec_full = star_model.calc_model(obs_time=time_full)
+        delta_ra_full, delta_dec_full, _ = star_model.calc_model(model_param=best_param, obs_time=time_full)
 
         # Stellar track, without acceleration
 
-        star_no_accel = StarModel(
-            star_param=best_param[:5], epoch_astrometry=self.epoch_astrometry
+        star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
+
+        delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_model(
+            model_param=best_param[:5], obs_time=None
         )
 
-        delta_ra_no_accel, delta_dec_no_accel = star_no_accel.calc_model(obs_time=None)
-
-        delta_ra_no_accel_full, delta_dec_no_accel_full = star_no_accel.calc_model(
-            obs_time=time_full
+        delta_ra_no_accel_full, delta_dec_no_accel_full, _ = star_no_accel.calc_model(
+            model_param=best_param[:5], obs_time=time_full
         )
 
         # Acceleration
@@ -1156,20 +1156,20 @@ class LeastSquares(ExoGaia):
         # plt.close()
 
         print(f"Best-fit parameters (RUWE = {global_ruwe:.3f}):")
-        print(f"   - RA (deg) = {global_param[0]:.3f} +/- {global_sigma[0]:.3f}")
-        print(f"   - Dec (deg) = {global_param[1]:.3f} +/- {global_sigma[1]:.3f}")
-        print(f"   - Parallax (mas) = {global_param[2]:.3f} +/- {global_sigma[2]:.3f}")
+        print(f"   - RA = {global_param[0]:.3f} deg +/- {global_sigma[0]:.3f} mas")
+        print(f"   - Dec = {global_param[1]:.3f} deg +/- {global_sigma[1]:.3f} mas")
+        print(f"   - Parallax = {global_param[2]:.3f} +/- {global_sigma[2]:.3f} mas")
         print(
-            f"   - mu in RA (mas/yr) = {global_param[3]:.3f} +/- {global_sigma[3]:.3f}"
+            f"   - mu in RA = {global_param[3]:.3f} +/- {global_sigma[3]:.3f} mas/yr"
         )
         print(
-            f"   - mu in Dec (mas/yr) = {global_param[4]:.3f} +/- {global_sigma[4]:.3f}"
+            f"   - mu in Dec = {global_param[4]:.3f} +/- {global_sigma[4]:.3f} mas/yr"
         )
         print(f"   - Thiele-Innes B = {global_param[5]:.3f} +/- {global_sigma[5]:.3f}")
         print(f"   - Thiele-Innes G = {global_param[6]:.3f} +/- {global_sigma[6]:.3f}")
         print(f"   - Thiele-Innes A = {global_param[7]:.3f} +/- {global_sigma[7]:.3f}")
         print(f"   - Thiele-Innes F = {global_param[8]:.3f} +/- {global_sigma[8]:.3f}")
-        print(f"   - Semi-major axis (au) = {global_orbit[0]:.3f}")
+        print(f"   - Semi-major axis = {global_orbit[0]:.3f} au")
         print(f"   - Eccentricity = {global_orbit[1]:.3f}")
         print(f"   - Relative time of periastron = {global_orbit[2]:.2f}")
 

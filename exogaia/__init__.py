@@ -29,8 +29,6 @@ __license__ = "MIT"
 __maintainer__ = "Tomas Stolker"
 __email__ = "stolker@strw.leidenuniv.nl"
 
-print("========\nexogaia\n========")
-
 # Check if there is a new version available
 
 EXOGAIA_VERSION = (
@@ -48,8 +46,6 @@ try:
 except (urllib.error.URLError, socket.timeout):
     pypi_version = None
 
-print(f"\nVersion: {__version__}")
-
 if pypi_version is not None:
     pypi_split = pypi_version.split(".")
     current_split = EXOGAIA_VERSION.split(".")
@@ -63,9 +59,7 @@ if pypi_version is not None:
     )
 
     if new_major | new_minor:
-        print(f"\nA new version ({pypi_version}) is available!")
-        print("Update exogaia by running:")
-        print("pip install --upgrade exogaia")
+        print(f"\nexogaia v{pypi_version} is available!")
 
 # Set Matplotlib style
 

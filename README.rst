@@ -30,8 +30,8 @@ Copyright 2025 Tomas Stolker
 .. |Python Versions| image:: https://img.shields.io/pypi/pyversions/exogaia
    :target: https://pypi.python.org/pypi/exogaia
 
-.. |CI Status| image:: https://github.com/tomasstolker/exogaia/actions/workflows/main.yml/badge.svg
-   :target: https://github.com/tomasstolker/exogaia/actions
+.. |CI Status| image:: https://github.com/tomasstolker/exogaia/actions/workflows/main.yml/badge.svg?branch=main
+   :target: https://github.com/tomasstolker/exogaia/actions/workflows/main.yml
 
 .. |Docs Status| image:: https://img.shields.io/readthedocs/exogaia
    :target: http://exogaia.readthedocs.io

@@ -18,7 +18,7 @@ from astroquery.gaia import Gaia
 from typeguard import typechecked
 
 from exogaia.core import ExoGaia
-from exogaia.models import BinaryModel
+from exogaia.models import BinaryModel, StarModel
 
 Gaia.ROW_LIMIT = -1
 
@@ -145,14 +145,14 @@ class EpochAstrometry(ExoGaia):
     @typechecked
     def simulate_data(
         self,
-        mass_1: float,
-        mass_2: float,
-        sma: float,
-        ecc: float,
-        inc: float,
-        aop: float,
-        pan: float,
-        tau: float,
+        mass_1: Optional[float] = None,
+        mass_2: Optional[float] = None,
+        sma: Optional[float] = None,
+        ecc: Optional[float] = None,
+        inc: Optional[float] = None,
+        aop: Optional[float] = None,
+        pan: Optional[float] = None,
+        tau: Optional[float] = None,
         sigma_per_ccd: Optional[float] = None,
         csv_out: Optional[str] = None,
         ra: Optional[float] = None,
@@ -163,9 +163,9 @@ class EpochAstrometry(ExoGaia):
         phot_g_mean_mag: Optional[float] = None,
     ) -> List[float]:
         """
-        Method to simulate the epoch astrometry for a binary system.
-        The HEALPix data has been adopted from ``gaiamock`` by
-        El-Badry et al. (2025).
+        Method to simulate the epoch astrometry for a single star
+        or binary system. The HEALPix data has been adopted from
+        ``gaiamock`` by El-Badry et al. (2025).
 
         MIT License
 
@@ -183,23 +183,30 @@ class EpochAstrometry(ExoGaia):
 
         Parameters
         ----------
-        mass_1 : float
-            Primary mass (Msun).
-        mass_2 : float
-            Secondary mass (Msun).
-        sma : float
-            Semi-major axis (au)
-        ecc : float
-            Eccentricity.
-        inc : float
-            Inclination (rad).
-        aop : float
-            Argument of periastron (rad).
-        pan : float
-            Position angle of the ascending nodes (rad).
-        tau : float
+        mass_1 : float, None
+            Primary mass (Msun). A single star is simulated by setting
+            the argument to ``None``.
+        mass_2 : float, None
+            Secondary mass (Msun). A single star is simulated by setting
+            the argument to ``None``.
+        sma : float, None
+            Semi-major axis (au). A single star is simulated by setting
+            the argument to ``None``.
+        ecc : float, None
+            Eccentricity. A single star is simulated by setting
+            the argument to ``None``.
+        inc : float, None
+            Inclination (rad). A single star is simulated by setting
+            the argument to ``None``.
+        aop : float, None
+            Argument of periastron (rad). A single star is simulated by
+            setting the argument to ``None``.
+        pan : float, None
+            Position angle of the ascending nodes (rad). A single star
+            is simulated by setting the argument to ``None``.
+        tau : float, None
             Periastron time, relative to the reference epoch
-            of ``gaia_release``.
+            of ``gaia_release``. A single star is simulated by setting
         sigma_per_ccd : float, None
             The AL uncertainty per CCD (mas). Setting the argument
             to ``None`` will adopt the G magnitude dependent
@@ -226,13 +233,16 @@ class EpochAstrometry(ExoGaia):
         list(float)
             List with model parameters, as RA (deg), Dec (deg),
             parallax (mas), RA proper motion (mas/yr), Dec proper
-            motion (mas/yr), semi-major axis (au), eccentricity,
-            inclination (deg), argument of periastron (rad),
-            position angle of ascending node (rad), relative time
-            of periastron, primary mass (Msun), secondary mass (Msun).
+            motion (mas/yr). For a binary system, followed by
+            semi-major axis (au), eccentricity, inclination (deg),
+            argument of periastron (rad), position angle of
+            ascending node (rad), relative time of periastron,
+            primary mass (Msun), secondary mass (Msun).
         """
 
         self.print_section("Simulate data")
+
+        # Adopt stellar parameters from class attributes
 
         if (
             ra is not None
@@ -248,6 +258,35 @@ class EpochAstrometry(ExoGaia):
             self.pmra = pmra
             self.pmdec = pmdec
             self.phot_g_mean_mag = phot_g_mean_mag
+
+        # Simulating single star or binary system?
+
+        if (
+            mass_1 is None
+            or mass_2 is None
+            or sma is None
+            or ecc is None
+            or inc is None
+            or aop is None
+            or pan is None
+            or tau is None
+        ):
+            binary = False
+
+            mass_1 = 0.0
+            mass_2 = 0.0
+            sma = 0.0
+            ecc = 0.0
+            inc = 0.0
+            aop = 0.0
+            pan = 0.0
+            tau = 0.0
+
+            print("System type: single")
+
+        else:
+            binary = True
+            print("System type: binary")
 
         # HEALPix data
 
@@ -341,7 +380,7 @@ class EpochAstrometry(ExoGaia):
             )
 
         sigma_per_transit = sigma_per_ccd / np.sqrt(n_ccd_avg)
-        print(f"AL scan uncertainty (per CCD) = {1e3*sigma_per_ccd:.2f} uas")
+        print(f"\nAL scan uncertainty (per CCD) = {1e3*sigma_per_ccd:.2f} uas")
         print(f"AL scan uncertainty (per transit) = {1e3*sigma_per_transit:.2f} uas")
 
         sim_astrom = {
@@ -362,34 +401,48 @@ class EpochAstrometry(ExoGaia):
         print(f"   - Proper motion in Dec (mas/yr) = {self.pmdec:.2f}")
         print(f"   - G-band magnitude = {self.phot_g_mean_mag:.2f}")
 
-        print("\nOrbit parameters:")
-        print(f"   - Primary mass (Msun) = {mass_1:.2f}")
-        print(f"   - Secondary mass (Msun) = {mass_2:.2f}")
-        print(f"   - Semi-major axis (au) = {sma:.2f}")
-        print(f"   - Eccentricity = {ecc:.2f}")
-        print(f"   - Inclination (deg) = {np.degrees(inc):.2f}")
-        print(f"   - Argument of periastron (deg) = {np.degrees(aop):.2f}")
-        print(f"   - PA of ascending node (deg) = {np.degrees(pan):.2f}")
-        print(f"   - Relative time of periastron = {tau:.2f}")
+        if binary:
+            print("\nOrbit parameters:")
+            print(f"   - Primary mass (Msun) = {mass_1:.2f}")
+            print(f"   - Secondary mass (Msun) = {mass_2:.2f}")
+            print(f"   - Semi-major axis (au) = {sma:.2f}")
+            print(f"   - Eccentricity = {ecc:.2f}")
+            print(f"   - Inclination (deg) = {np.degrees(inc):.2f}")
+            print(f"   - Argument of periastron (deg) = {np.degrees(aop):.2f}")
+            print(f"   - PA of ascending node (deg) = {np.degrees(pan):.2f}")
+            print(f"   - Relative time of periastron = {tau:.2f}")
 
-        model_param = [
-            self.ra,
-            self.dec,
-            self.parallax,
-            self.pmra,
-            self.pmdec,
-            sma,
-            ecc,
-            inc,
-            aop,
-            pan,
-            tau,
-            mass_1,
-            mass_2,
-        ]
+            model_param = [
+                self.ra,
+                self.dec,
+                self.parallax,
+                self.pmra,
+                self.pmdec,
+                sma,
+                ecc,
+                inc,
+                aop,
+                pan,
+                tau,
+                mass_1,
+                mass_2,
+            ]
 
-        bin_model = BinaryModel(self, verbose=False)
-        cen_pos = bin_model.calc_model(model_param=model_param)
+            # self is the current EpochAstrometry object
+            bin_model = BinaryModel(epoch_astrometry=self, verbose=False)
+            cen_pos = bin_model.calc_model(model_param=model_param)
+
+        else:
+            model_param = [
+                self.ra,
+                self.dec,
+                self.parallax,
+                self.pmra,
+                self.pmdec,
+            ]
+
+            star_model = StarModel(epoch_astrometry=self)
+            _, _, cen_pos = star_model.calc_model(model_param=model_param)
 
         rng = np.random.default_rng()
         cen_pos += rng.normal(loc=0.0, scale=sigma_per_transit, size=len(psi))
