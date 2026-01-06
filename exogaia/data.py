@@ -161,25 +161,11 @@ class EpochAstrometry(ExoGaia):
         pmra: Optional[float] = None,
         pmdec: Optional[float] = None,
         phot_g_mean_mag: Optional[float] = None,
+        reject_fraction: Optional[float] = None,
     ) -> List[float]:
         """
-        Method to simulate the epoch astrometry for a single star
-        or binary system. The HEALPix data has been adopted from
-        ``gaiamock`` by El-Badry et al. (2025).
-
-        MIT License
-
-        Copyright (c) 2024 kareemelbadry
-
-        Permission is hereby granted, free of charge, to any person obtaining a copy
-        of this software and associated documentation files (the "Software"), to deal
-        in the Software without restriction, including without limitation the rights
-        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-        copies of the Software, and to permit persons to whom the Software is
-        furnished to do so, subject to the following conditions:
-
-        The above copyright notice and this permission notice shall be included in all
-        copies or substantial portions of the Software.
+        Method to simulate the epoch astrometry for a
+        single star or binary system.
 
         Parameters
         ----------
@@ -227,6 +213,11 @@ class EpochAstrometry(ExoGaia):
             Proper motion in Dec (mas/yr).
         phot_g_mean_mag : float, None
             Gaia G-band magnitude.
+        reject_fraction : float, None
+            The fraction of data to reject. About 10 percent of
+            FOV transits has an issue (see Lindegren et al. 2021).
+            The default is ``None``, in which case no data
+            is rejected.
 
         Returns
         -------
@@ -288,7 +279,12 @@ class EpochAstrometry(ExoGaia):
             binary = True
             print("System type: binary")
 
-        # HEALPix data
+        # Scan angles, parallax factors, and observation
+        # times have been retrieved with GOST (see
+        # https://gaia.esac.esa.int/gost/index.jsp) for the
+        # RA/DEC of all HEALPix indices with NSIDE=64
+        # (i.e. 49152 indices). The data for each index is
+        # stored in a separate group of the HDF5 file.
 
         data_folder = Path.home() / ".exogaia"
 
@@ -305,22 +301,23 @@ class EpochAstrometry(ExoGaia):
 
             pooch.retrieve(
                 url=url,
-                known_hash="a470eb369d50cb14587e9d0c4450d5e4264e93b6c81f909d157dc0e3e9fbab43",
+                known_hash="54c786f345b891849f43134c9587b03acb9626d935594c2f62469963981ba798",
                 fname=file_name,
                 path=data_folder,
                 progressbar=True,
             )
 
-        # Find the scan times and angles for a given sky position
-        # by searching for the nearest position in a set of pre-
-        # downloaded 49152 sky positions (healpix level 64)
+        # Read the scan data for a given sky position by
+        # selecting the nearest HEALPix position
 
-        healp_num = healpy.ang2pix(64, self.ra, self.dec, lonlat=True)
+        nside = 64
+
+        pix_num = healpy.ang2pix(nside=nside, theta=self.ra, phi=self.dec, lonlat=True)
 
         with h5py.File(healpix_file, "r") as hdf5_file:
-            healp_table = Table(hdf5_file[f"healpix_64_{healp_num}"][:])
+            healpix_table = Table(hdf5_file[f"healpix_{nside}_{pix_num:05d}"])
 
-        obs_time_full = healp_table[
+        obs_time_full = healpix_table[
             "ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]"
         ]
 
@@ -345,13 +342,15 @@ class EpochAstrometry(ExoGaia):
             obs_time_full < self.time_end.tcb.jd
         )
 
-        table_select = healp_table[time_select]
+        table_select = healpix_table[time_select]
 
-        # Reject 10% of the data
-        # See Sect. 3.3 in El-Badry et al. (2024)
-        # rand_gen = np.random.default_rng()
-        # rand_unif = rand_gen.uniform(low=0.0, high=1.0, size=len(table_select))
-        # table_select = table_select[rand_unif > 0.1]
+        # Reject a fraction of the data. About 10% of FOV
+        # transits has an issue (see Lindegren et al. 2021)
+
+        if reject_fraction is not None:
+            rand_gen = np.random.default_rng()
+            rand_unif = rand_gen.uniform(low=0.0, high=1.0, size=len(table_select))
+            table_select = table_select[rand_unif > reject_fraction]
 
         psi, plx_factor, obs_time_tcb = (
             table_select["scanAngle[rad]"],
@@ -507,6 +506,9 @@ class EpochAstrometry(ExoGaia):
                 "gaiadr4.nss_multiplicity",
                 "gaiadr4.nss_resolved_pair",
             ]
+
+        else:
+            raise ValueError("The '{self.gaia_release}' is not supported.")
 
         for table_item in gaia_tables:
             # Query Gaia NSS tables

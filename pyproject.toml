@@ -44,7 +44,7 @@ docs = [
     "pandoc",
     "sphinx",
     "sphinx-automodapi",
-    "sphinx-readable-theme",
+    "sphinxawesome-theme",
 ]
 test = [
     "black",

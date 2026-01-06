@@ -130,8 +130,14 @@ class LeastSquares(ExoGaia):
         # RUWE
         ruwe = np.sqrt(chi2_red)
 
-        # F2 goodness-of fit statistic from Wilson–Hilferty transformation
-        # See Eq. 11 in El-Badry et al. (2024)
+        # F2 estimator, which obeys a normal distribution N(0,1)
+        # See Equation 1 in Halbwachs et al. (2023)
+        f2_stat = np.sqrt(9.0 * n_dof / 2.0) * (
+            chi2_red ** (1.0 / 3.0) + 2.0 / (9.0 * n_dof) - 1
+        )
+
+        # Uncertainty inflation such that F2 will be zero
+        # See Equation 2 in Halbwachs et al. (2023)
         infl_fact = np.sqrt(chi2_red / ((1.0 - 2.0 / (9.0 * n_dof)) ** 3))
 
         # Parameter covariances
@@ -140,15 +146,91 @@ class LeastSquares(ExoGaia):
 
         # Parameter covariances
         cov_matrix = np.linalg.inv(design.T @ self.inv_cov @ design)
+
+        # Covariance inflation
+        if infl_fact > 1.0:
+            cov_matrix *= infl_fact
+
+        # Uncorrelated uncertainties
         param_sig = np.sqrt(np.diag(cov_matrix))
 
-        if infl_fact > 1.0:
-            param_sig *= infl_fact
+        @typechecked
+        def significance(
+            param_1: float, param_2: float, sigma_1: float, sigma_2: float, rho: float
+        ) -> float:
+            """
+            Compute the combined significance of two correlated
+            parameters, taking into account their uncertainties
+            and correlation.
+
+            Parameters
+            ----------
+            param_1 : float
+                The value of the first parameter.
+            param_2 : float
+                The value of the second parameter.
+            sigma_1 : float
+                The uncertainty of the first parameter.
+            sigma_2 : float
+                The uncertainty of the second parameter.
+            rho : float
+                The correlation coefficient between param_1 and param_2,
+                must be between -1 and 1.
+
+            Returns
+            -------
+            float
+                The combined significance of the two parameters.
+            """
+
+            return (
+                1
+                / (sigma_1 * sigma_2)
+                * np.sqrt(
+                    (
+                        param_1**2 * sigma_2**2
+                        + param_2**2 * sigma_1**2
+                        - 2 * param_1 * param_2 * rho * sigma_1 * sigma_2
+                    )
+                    / (1 - rho**2)
+                )
+            )
+
+        # Significance of adding acceleration parameters
+        # Calculated as: vector_magnitude / vector_uncertainty
+        # See Equation 3 in Halbwachs et al. (2023)
+
+        if n_param in [7, 9]:
+            rho = cov_matrix[5][6] / (param_sig[5] * param_sig[6])
+
+            sig_7param = significance(
+                best_param[5], best_param[6], param_sig[5], param_sig[6], rho
+            )
+
+        else:
+            sig_7param = None
+
+        if n_param == 9:
+            rho = cov_matrix[7][8] / (param_sig[7] * param_sig[8])
+
+            sig_9param = significance(
+                best_param[7], best_param[8], param_sig[7], param_sig[8], rho
+            )
+
+        else:
+            sig_9param = None
 
         if verbose:
             print(f"Reduced chi^2 = {chi2_red:.3f}")
             print(f"RUWE = {ruwe:.3f}")
+            print(f"F2 estimator = {f2_stat:.3f}")
             print(f"Inflation factor = {infl_fact:.3f}")
+
+            if sig_7param is not None:
+                print(f"Significance dmu/dt = {sig_7param:.3f}")
+
+            if sig_9param is not None:
+                print(f"Significance d^2mu/d^2t = {sig_9param:.3f}")
 
         return best_model, best_param, param_sig, ruwe
 
@@ -279,8 +361,7 @@ class LeastSquares(ExoGaia):
             axs[0].set_title(
                 rf"RA = {best_param[0]:.3f} deg $\pm$ {param_sig[0]:.3f} mas" + "\n"
                 rf"Dec = {best_param[1]:.3f} deg $\pm$ {param_sig[1]:.3f} mas" + "\n"
-                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas"
-                + "\n"
+                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas" + "\n"
                 rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
                 rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
@@ -512,8 +593,7 @@ class LeastSquares(ExoGaia):
             axs[0].set_title(
                 rf"RA = {best_param[0]:.3f} deg $\pm$ {param_sig[0]:.3f} mas" + "\n"
                 rf"Dec = {best_param[1]:.3f} deg $\pm$ {param_sig[1]:.3f} mas" + "\n"
-                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas"
-                + "\n"
+                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas" + "\n"
                 rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
                 rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
@@ -849,8 +929,7 @@ class LeastSquares(ExoGaia):
             axs[0].set_title(
                 rf"RA = {best_param[0]:.3f} deg $\pm$ {param_sig[0]:.3f} mas" + "\n"
                 rf"Dec = {best_param[1]:.3f} deg $\pm$ {param_sig[1]:.3f} mas" + "\n"
-                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas"
-                + "\n"
+                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas" + "\n"
                 rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
                 rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
@@ -1076,7 +1155,7 @@ class LeastSquares(ExoGaia):
         tau_grid = np.zeros((loga_list.size, ecc_list.size, tau_list.size))
 
         global_ruwe = np.inf
-        global_model = None
+        # global_model = None
         global_param = None
         global_sigma = None
         global_orbit = None
@@ -1121,7 +1200,7 @@ class LeastSquares(ExoGaia):
 
                     if ruwe < global_ruwe:
                         global_ruwe = ruwe
-                        global_model = best_model
+                        # global_model = best_model
                         global_param = best_param
                         global_sigma = param_sig
                         global_orbit = [sma, ecc_item, tau_item]

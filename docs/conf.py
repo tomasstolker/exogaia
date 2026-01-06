@@ -7,32 +7,32 @@
 # -- Path setup --------------------------------------------------------------
 
 # If extensions (or modules to document with autodoc) are in another directory,
-# add these directories to sys.path here. If the directory is relative to the
-# documentation root, use os.path.abspath to make it absolute, like shown here.
+# add these directories to sys.path here.
 
-import os
 import sys
-sys.path.insert(0, os.path.abspath('../'))
 
-import sphinx_readable_theme
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent.resolve()))
 
 # -- Project information -----------------------------------------------------
 
-project = 'exogaia'
-copyright = '2025, Tomas Stolker'
-author = 'Tomas Stolker'
+project = "exogaia"
+copyright = "2026, Tomas Stolker"
+author = "Tomas Stolker"
 
 # -- General configuration ---------------------------------------------------
 
 # Add any Sphinx extension module names here, as strings. They can be
-# extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
+# extensions coming with Sphinx (named "sphinx.ext.*") or your custom
 # ones.
 
 extensions = [
-    'sphinx.ext.autodoc',
-    'sphinx.ext.napoleon',
-    'sphinx.ext.viewcode',
-    'nbsphinx'
+    "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
+    "nbsphinx"
 ]
 
 numpydoc_show_class_members = False
@@ -41,15 +41,24 @@ numpydoc_show_class_members = False
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
 
-exclude_patterns = ['_build',
-                    'Thumbs.db',
-                    '.DS_Store',
-                    '.ipynb_checkpoints/*']
+exclude_patterns = ["_build",
+                    "Thumbs.db",
+                    ".DS_Store",
+                    ".ipynb_checkpoints/*"]
 
 # -- Options for HTML output -------------------------------------------------
 
-html_theme = 'readable'
-html_theme_path = [sphinx_readable_theme.get_html_theme_path()]
+html_theme = "sphinxawesome_theme"
+
+html_theme_options = {
+    "show_breadcrumbs": True,
+    "show_scrolltop": True,
+    "show_prev_next": True,
+    "main_nav_links": {
+        "GitHub": "https://github.com/tomasstolker/exogaia",
+        "PyPI": "https://pypi.org/project/exogaia/",
+    },
+}
 
 html_context = {
     "github_user": "tomasstolker",
@@ -60,4 +69,4 @@ html_context = {
 
 html_static_path = []
 
-html_search_language = 'en'
+html_search_language = "en"
