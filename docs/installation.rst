@@ -3,7 +3,9 @@
 Installation
 ============
 
-``exogaia`` is available on `PyPI <https://pypi.org/project/exogaia/>`_ and `Github <https://github.com/tomasstolker/exogaia>`_.
+``exogaia`` is currently a private repository on `Github <https://github.com/tomasstolker/exogaia>`_, but will be publicly released in the future. Interested to use the code already? Please :ref:`send an email <about>` with a request to be included as collaborator in the Github repo.
+
+The following installation instructions are for future purpose and don't work yet.
 
 Installation from PyPI
 ----------------------

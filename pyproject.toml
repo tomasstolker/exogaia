@@ -18,6 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "astroquery",
+    "beartype",
     "corner",
     "dynesty",
     "emcee",
@@ -33,7 +34,6 @@ dependencies = [
     "scipy",
     "schwimmbad",
     "tqdm",
-    "typeguard",
 ]
 dynamic = ["version"]
 

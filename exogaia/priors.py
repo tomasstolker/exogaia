@@ -6,8 +6,8 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
+from beartype import beartype, typing
 from scipy.stats import norm, truncnorm
-from typeguard import typechecked
 
 
 class Prior(ABC):
@@ -33,7 +33,7 @@ class UniformPrior(Prior):
     Class for a uniform prior.
     """
 
-    @typechecked
+    @beartype
     def __init__(self, min_val: float, max_val: float) -> None:
         """
         Parameters
@@ -53,7 +53,7 @@ class UniformPrior(Prior):
         self.max_val = max_val
         self.rng = np.random.default_rng()
 
-    @typechecked
+    @beartype
     def __repr__(self) -> str:
         """
         String representation of the class.
@@ -66,7 +66,7 @@ class UniformPrior(Prior):
 
         return f"Uniform: [{self.min_val:.2f}, {self.max_val:.2f}]"
 
-    @typechecked
+    @beartype
     def draw_samples(self, n_samples: int) -> np.ndarray:
         """
         Method for drawing random samples from the prior distribution.
@@ -86,7 +86,7 @@ class UniformPrior(Prior):
 
         return self.transform_samples(samples)
 
-    @typechecked
+    @beartype
     def transform_samples(self, unit_samples: np.ndarray) -> np.ndarray:
         """
         Method for transforming the unit samples into parameter samples.
@@ -110,7 +110,7 @@ class LogUniformPrior(Prior):
     Class for a log-uniform prior.
     """
 
-    @typechecked
+    @beartype
     def __init__(self, min_val: float, max_val: float) -> None:
         """
         Parameters
@@ -130,7 +130,7 @@ class LogUniformPrior(Prior):
         self.log_max = np.log10(max_val)
         self.rng = np.random.default_rng()
 
-    @typechecked
+    @beartype
     def __repr__(self) -> str:
         """
         String representation of the class.
@@ -143,7 +143,7 @@ class LogUniformPrior(Prior):
 
         return f"LogUniform: [{self.log_min:.2f}, {self.log_max:.2f}]"
 
-    @typechecked
+    @beartype
     def draw_samples(self, n_samples: int) -> np.ndarray:
         """
         Method for drawing random samples from the prior distribution.
@@ -163,7 +163,7 @@ class LogUniformPrior(Prior):
 
         return self.transform_samples(samples)
 
-    @typechecked
+    @beartype
     def transform_samples(self, unit_samples: np.ndarray) -> np.ndarray:
         """
         Method for transforming the unit samples into parameter samples.
@@ -189,7 +189,7 @@ class NormalPrior(Prior):
     Class for a normal prior.
     """
 
-    @typechecked
+    @beartype
     def __init__(
         self,
         mu: float,
@@ -221,7 +221,7 @@ class NormalPrior(Prior):
         self.truncate_one = truncate_one
         self.rng = np.random.default_rng()
 
-    @typechecked
+    @beartype
     def __repr__(self) -> str:
         """
         String representation of the class.
@@ -234,7 +234,7 @@ class NormalPrior(Prior):
 
         return f"Normal: [{self.mu:.2f}, {self.sigma:.2f}]"
 
-    @typechecked
+    @beartype
     def draw_samples(self, n_samples: int) -> np.ndarray:
         """
         Method for drawing random samples from the prior distribution.
@@ -254,7 +254,7 @@ class NormalPrior(Prior):
 
         return self.transform_samples(samples)
 
-    @typechecked
+    @beartype
     def transform_samples(self, unit_samples: np.ndarray) -> np.ndarray:
         """
         Method for transforming the unit samples into parameter samples.
@@ -297,7 +297,7 @@ class SinPrior(Prior):
     Class for a sine prior.
     """
 
-    @typechecked
+    @beartype
     def __init__(self) -> None:
         """
         Returns
@@ -308,7 +308,7 @@ class SinPrior(Prior):
 
         self.rng = np.random.default_rng()
 
-    @typechecked
+    @beartype
     def __repr__(self) -> str:
         """
         String representation of the class.
@@ -321,7 +321,7 @@ class SinPrior(Prior):
 
         return "Sin: arccos(1 - 2u)"
 
-    @typechecked
+    @beartype
     def draw_samples(self, n_samples: int) -> np.ndarray:
         """
         Method for drawing random samples from the prior distribution.
@@ -341,7 +341,7 @@ class SinPrior(Prior):
 
         return self.transform_samples(samples)
 
-    @typechecked
+    @beartype
     def transform_samples(self, unit_samples: np.ndarray) -> np.ndarray:
         """
         Method for transforming the unit samples into parameter samples.
@@ -365,7 +365,7 @@ class FixedPrior(Prior):
     Class for a fixed prior.
     """
 
-    @typechecked
+    @beartype
     def __init__(self, fix_val: float) -> None:
         """
         Parameters
@@ -381,7 +381,7 @@ class FixedPrior(Prior):
 
         self.fix_val = fix_val
 
-    @typechecked
+    @beartype
     def __repr__(self) -> str:
         """
         String representation of the class.
@@ -394,7 +394,7 @@ class FixedPrior(Prior):
 
         return f"Fixed: {self.fix_val:.2f}"
 
-    @typechecked
+    @beartype
     def draw_samples(self, n_samples: int) -> np.ndarray:
         """
         Method for drawing random samples from the prior distribution.
@@ -412,7 +412,7 @@ class FixedPrior(Prior):
 
         return np.full(n_samples, self.fix_val)
 
-    @typechecked
+    @beartype
     def transform_samples(self, unit_samples: np.ndarray) -> None:
         """
         Method for transforming the unit samples into parameter samples.

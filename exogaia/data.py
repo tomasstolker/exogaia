@@ -2,8 +2,9 @@
 Module for Gaia epoch astrometry data.
 """
 
+import warnings
+
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
 
 import h5py
 import healpy
@@ -15,7 +16,7 @@ from astropy import units as u
 from astropy.table import Table
 from astropy.time import Time
 from astroquery.gaia import Gaia
-from typeguard import typechecked
+from beartype import beartype, typing
 
 from exogaia.core import ExoGaia
 from exogaia.models import BinaryModel, StarModel
@@ -29,11 +30,11 @@ class EpochAstrometry(ExoGaia):
     epoch astrometry data.
     """
 
-    @typechecked
+    @beartype
     def __init__(
         self,
-        primary_mass: Tuple[float, float] = None,
-        gaia_release: str = "DR3",
+        primary_mass: typing.Optional[typing.Tuple[float, float]] = None,
+        gaia_release: str = "DR4",
     ) -> None:
         """
         Parameters
@@ -106,7 +107,7 @@ class EpochAstrometry(ExoGaia):
 
         return data_str
 
-    @typechecked
+    @beartype
     def read_file(
         self,
         data_file: str,
@@ -134,7 +135,7 @@ class EpochAstrometry(ExoGaia):
 
         if "relative_time_year" not in self.data_table:
             self.data_table["relative_time_year"] = (
-                self.data_table["obs_time_tcb"] - self.ref_epoch.jyear
+                self.data_table["obs_time_tcb"] - self.ref_epoch.tcb.jyear
             )
 
         if "relative_time_day" not in self.data_table:
@@ -142,27 +143,29 @@ class EpochAstrometry(ExoGaia):
                 "relative_time_year"
             ] * u.year.to(u.day)
 
-    @typechecked
+    @beartype
     def simulate_data(
         self,
-        mass_1: Optional[float] = None,
-        mass_2: Optional[float] = None,
-        sma: Optional[float] = None,
-        ecc: Optional[float] = None,
-        inc: Optional[float] = None,
-        aop: Optional[float] = None,
-        pan: Optional[float] = None,
-        tau: Optional[float] = None,
-        sigma_per_ccd: Optional[float] = None,
-        csv_out: Optional[str] = None,
-        ra: Optional[float] = None,
-        dec: Optional[float] = None,
-        parallax: Optional[float] = None,
-        pmra: Optional[float] = None,
-        pmdec: Optional[float] = None,
-        phot_g_mean_mag: Optional[float] = None,
-        reject_fraction: Optional[float] = None,
-    ) -> List[float]:
+        mass_1: typing.Optional[float] = None,
+        mass_2: typing.Optional[float] = None,
+        sma: typing.Optional[float] = None,
+        ecc: typing.Optional[float] = None,
+        inc: typing.Optional[float] = None,
+        aop: typing.Optional[float] = None,
+        pan: typing.Optional[float] = None,
+        tau: typing.Optional[float] = None,
+        sigma_per_ccd: typing.Optional[float] = None,
+        csv_out: typing.Optional[str] = None,
+        ra: typing.Optional[float] = None,
+        dec: typing.Optional[float] = None,
+        parallax: typing.Optional[float] = None,
+        pmra: typing.Optional[float] = None,
+        pmdec: typing.Optional[float] = None,
+        phot_g_mean_mag: typing.Optional[float] = None,
+        reject_fraction: typing.Optional[float] = None,
+        occ_rate: typing.Optional[typing.Callable] = None,
+        verbose: bool = True,
+    ) -> typing.List[float]:
         """
         Method to simulate the epoch astrometry for a
         single star or binary system.
@@ -218,6 +221,16 @@ class EpochAstrometry(ExoGaia):
             FOV transits has an issue (see Lindegren et al. 2021).
             The default is ``None``, in which case no data
             is rejected.
+        occ_rate : Callable, None
+            Function that calculates the planet occurrence rate for
+            a given primary mass (Msun) and semi-major-axis (au).
+            This function is used if ``sma`` is set to ``None``.
+            The relation from `Fulton et al. (2021) <https://ui.
+            adsabs.harvard.edu/abs/2021ApJS..255...14F>`_ is used
+            if the argument is set to ``None`` and ``sma`` is
+            also set to ``None``.
+        verbose : bool
+            Print some information.
 
         Returns
         -------
@@ -231,7 +244,8 @@ class EpochAstrometry(ExoGaia):
             primary mass (Msun), secondary mass (Msun).
         """
 
-        self.print_section("Simulate data")
+        if verbose:
+            self.print_section("Simulate data")
 
         # Adopt stellar parameters from class attributes
 
@@ -252,16 +266,63 @@ class EpochAstrometry(ExoGaia):
 
         # Simulating single star or binary system?
 
-        if (
-            mass_1 is None
-            or mass_2 is None
-            or sma is None
-            or ecc is None
-            or inc is None
-            or aop is None
-            or pan is None
-            or tau is None
-        ):
+        @beartype
+        def planet_occurrence(
+            sma_planet: float,
+            mass_star: float,
+        ) -> float:
+            """
+            Planet occurrence-rate density as given by Equation 5
+            in Fulton et al. (2021). The occurrence density is
+            defined as d^2 N / (dln(a) dln(M_p)) with an implicit
+            log-flat mass-dependence over 30–6000 Earth masses.
+            The function is therefore valid for planet mass in the
+            range of 30 to 6000 Earth masses and semi-major axes
+            in the range of 0.03 to 30 au.
+
+            Parameters
+            ----------
+            sma_planet : float
+                Semi-major axis of the planet orbit (au).
+            mass_star : float
+                Primary mass (Msun).
+
+            Returns
+            -------
+            float
+                Planet occurrence-rate density.
+            """
+
+            # Validity ranges
+            m_min, m_max = 30.0, 6000.0
+            a_min, a_max = 0.03, 30.0
+
+            if np.any((sma_planet <= a_min) | (sma_planet > a_max)):
+                warnings.warn(
+                    "Semi-major axis outside calibrated range " f"(0, {a_max}] AU.",
+                    UserWarning,
+                )
+
+            # Broken powerlaw parameters (Fulton et al. 2021)
+            norm_fulton = 350.0
+            beta = -0.86
+            a_break = 3.6
+            gamma = 1.59
+
+            # Number of giant planets scales approximately
+            # linearly with stellar mass.
+            # See Equation 24 in Lammers & Winn (2025)
+            norm_lammers = norm_fulton * (mass_star / 0.9)
+
+            occ_rate = (
+                norm_lammers
+                * (sma_planet**beta)
+                * (1.0 - np.exp(-((sma_planet / a_break) ** gamma)))
+            )
+
+            return occ_rate
+
+        if mass_1 is None or mass_2 is None:
             binary = False
 
             mass_1 = 0.0
@@ -273,11 +334,39 @@ class EpochAstrometry(ExoGaia):
             pan = 0.0
             tau = 0.0
 
-            print("System type: single")
+            if verbose:
+                print("System type: single")
 
         else:
             binary = True
-            print("System type: binary")
+
+            if verbose:
+                print("System type: binary")
+
+            # Sample random orbit parameters if not provided
+
+            rng = np.random.default_rng()
+
+            if sma is None:
+                # sma = rng.uniform(0.1, 30.0)
+                log_sma = rng.uniform(np.log10(0.1), np.log10(30.0))
+                sma = 10.0**log_sma
+
+            if ecc is None:
+                # Beta distribution (Kipping 2013)
+                ecc = rng.beta(a=0.867, b=3.03)
+
+            if inc is None:
+                inc = np.arccos(rng.uniform(-1.0, 1.0))
+
+            if aop is None:
+                aop = rng.uniform(0.0, 2.0 * np.pi)
+
+            if pan is None:
+                pan = rng.uniform(0.0, 2.0 * np.pi)
+
+            if tau is None:
+                tau = rng.uniform(0.0, 1.0)
 
         # Scan angles, parallax factors, and observation
         # times have been retrieved with GOST (see
@@ -317,6 +406,7 @@ class EpochAstrometry(ExoGaia):
         with h5py.File(healpix_file, "r") as hdf5_file:
             healpix_table = Table(hdf5_file[f"healpix_{nside}_{pix_num:05d}"])
 
+        # Observation times in Julian days on TCB scale
         obs_time_full = healpix_table[
             "ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]"
         ]
@@ -358,8 +448,9 @@ class EpochAstrometry(ExoGaia):
             table_select["ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]"],
         )
 
-        t_ast_day = obs_time_tcb - self.ref_epoch.jd
-        t_ast_yr = t_ast_day / 365.25
+        t_ast = Time(obs_time_tcb, format="jd", scale="tcb") - self.ref_epoch.tcb
+        t_ast_day = t_ast.to_value("day")
+        t_ast_yr = t_ast.to_value("yr")
 
         # Median CCD AL-scan abscissa uncertainty persource.
         # Digitized from Fig. 3 in Holl et al. (2023)
@@ -379,37 +470,47 @@ class EpochAstrometry(ExoGaia):
             )
 
         sigma_per_transit = sigma_per_ccd / np.sqrt(n_ccd_avg)
-        print(f"\nAL scan uncertainty (per CCD) = {1e3*sigma_per_ccd:.2f} uas")
-        print(f"AL scan uncertainty (per transit) = {1e3*sigma_per_transit:.2f} uas")
+        if verbose:
+            print(f"\nAL scan uncertainty (per CCD) = {1e3*sigma_per_ccd:.2f} uas")
+            print(
+                f"AL scan uncertainty (per transit) = {1e3*sigma_per_transit:.2f} uas"
+            )
 
         sim_astrom = {
-            "obs_time_tcb": t_ast_yr + self.ref_epoch.jyear,
+            "obs_time_tcb": t_ast_yr + self.ref_epoch.tcb.jyear,
             "relative_time_year": t_ast_yr,
-            "relative_time_day": t_ast_yr * u.year.to(u.day),
+            "relative_time_day": t_ast_day,
             "scan_pos_angle": psi,
             "parallax_factor_al": plx_factor,
         }
 
         self.data_table = pd.DataFrame(sim_astrom)
 
-        print("\nStellar parameters:")
-        print(f"   - RA (deg) = {self.ra:.2f}")
-        print(f"   - Dec (deg) = {self.dec:.2f}")
-        print(f"   - Parallax (mas) = {self.parallax:.2f}")
-        print(f"   - Proper motion in RA (mas/yr) = {self.pmra:.2f}")
-        print(f"   - Proper motion in Dec (mas/yr) = {self.pmdec:.2f}")
-        print(f"   - G-band magnitude = {self.phot_g_mean_mag:.2f}")
+        if verbose:
+            print("\nStellar parameters:")
+            print(f"   - RA (deg) = {self.ra:.2f}")
+            print(f"   - Dec (deg) = {self.dec:.2f}")
+            print(f"   - Parallax (mas) = {self.parallax:.2f}")
+            print(f"   - Proper motion in RA (mas/yr) = {self.pmra:.2f}")
+            print(f"   - Proper motion in Dec (mas/yr) = {self.pmdec:.2f}")
+            print(f"   - G-band magnitude = {self.phot_g_mean_mag:.2f}")
 
         if binary:
-            print("\nOrbit parameters:")
-            print(f"   - Primary mass (Msun) = {mass_1:.2f}")
-            print(f"   - Secondary mass (Msun) = {mass_2:.2f}")
-            print(f"   - Semi-major axis (au) = {sma:.2f}")
-            print(f"   - Eccentricity = {ecc:.2f}")
-            print(f"   - Inclination (deg) = {np.degrees(inc):.2f}")
-            print(f"   - Argument of periastron (deg) = {np.degrees(aop):.2f}")
-            print(f"   - PA of ascending node (deg) = {np.degrees(pan):.2f}")
-            print(f"   - Relative time of periastron = {tau:.2f}")
+            # Orbital period (days)
+            # Use sma in au and masses in Msun
+            period = np.sqrt(sma**3 / (mass_1 + mass_2)) * 365.25
+
+            if verbose:
+                print("\nOrbit parameters:")
+                print(f"   - Primary mass (Msun) = {mass_1:.2f}")
+                print(f"   - Secondary mass (Msun) = {mass_2:.2f}")
+                print(f"   - Semi-major axis (au) = {sma:.2f}")
+                print(f"   - Eccentricity = {ecc:.2f}")
+                print(f"   - Inclination (deg) = {np.degrees(inc):.2f}")
+                print(f"   - Argument of periastron (deg) = {np.degrees(aop):.2f}")
+                print(f"   - PA of ascending node (deg) = {np.degrees(pan):.2f}")
+                print(f"   - Relative time of periastron = {tau:.2f}")
+                print(f"   - Period (days) = {period:.2f}")
 
             model_param = [
                 self.ra,
@@ -457,7 +558,7 @@ class EpochAstrometry(ExoGaia):
 
         return model_param
 
-    @typechecked
+    @beartype
     def get_nss_tables(self) -> None:
         """
         Method for downloading and storing the Gaia non-single star
@@ -531,10 +632,12 @@ class EpochAstrometry(ExoGaia):
                 overwrite=True,
             )
 
-    @typechecked
+    @beartype
     def query_source(
-        self, source_id: Optional[Union[int, str]] = None, gaia_release: str = "DR3"
-    ) -> List[float]:
+        self,
+        source_id: typing.Optional[typing.Union[int, str]] = None,
+        gaia_release: str = "DR3",
+    ) -> typing.List[float]:
         """
         Method for retrieving stellar parameter from the Gaia catalog,
         specifically the RA/Dec, parallax, proper motion, and G-band
@@ -609,8 +712,10 @@ class EpochAstrometry(ExoGaia):
 
         return [ra, dec, parallax, pmra, pmdec, phot_g_mean_mag]
 
-    @typechecked
-    def retrieve_data(self, source_id: Optional[Union[int, str]] = None) -> None:
+    @beartype
+    def retrieve_data(
+        self, source_id: typing.Optional[typing.Union[int, str]] = None
+    ) -> None:
         """
         Method for retrieving the epoch astrometry for the selected
         Gaia source. This will only be possible for the future DR4
@@ -671,7 +776,7 @@ class EpochAstrometry(ExoGaia):
             else:
                 print(f"\nSource not found in {table_item}")
 
-    @typechecked
+    @beartype
     def gaia_bh3(self) -> None:
         """
         Method for storing the Gaia DR3 epoch astrometry of
@@ -699,17 +804,29 @@ class EpochAstrometry(ExoGaia):
         print(f"Reference epoch: {self.ref_epoch}")
         print("Source ID: 4318465066420528000")
 
+        if self.primary_mass is None:
+            self.primary_mass = (0.76, 0.05)  # (Msun)
+
+        print(
+            f"\nPrimary mass (Msun): {self.primary_mass[0]:.2f} +/- {self.primary_mass[1]:.2f}"
+        )
+
         self.data_table = pd.read_csv(
             data_file, sep=r"\s+", header="infer", comment="#", skip_blank_lines=True
         )
 
+        # Convert from Julian days to Julian years
+        self.data_table["obs_time_tcb"] = Time(
+            self.data_table["obs_time_tcb"], format="jd", scale="tcb"
+        ).tcb.jyear
+
         if "relative_time_year" not in self.data_table:
             self.data_table["relative_time_year"] = (
-                self.data_table["obs_time_tcb"] - self.ref_epoch.jyear
+                self.data_table["obs_time_tcb"] - self.ref_epoch.tcb.jyear
             )
 
         if "relative_time_day" not in self.data_table:
-            self.data_table["relative_time_year"] = self.data_table[
+            self.data_table["relative_time_day"] = self.data_table[
                 "relative_time_year"
             ] * u.year.to(u.day)
 

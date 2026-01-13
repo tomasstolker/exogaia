@@ -2,10 +2,10 @@
 Module with the ``LeastSquares`` class.
 """
 
-from typing import Optional, Tuple
-
 import matplotlib.pyplot as plt
 import numpy as np
+
+from beartype import beartype, typing
 
 # from matplotlib import cm
 from matplotlib.gridspec import GridSpec
@@ -16,7 +16,6 @@ from matplotlib.figure import Figure
 
 # from scipy.linalg import cho_factor, cho_solve
 from tqdm.auto import tqdm
-from typeguard import typechecked
 
 from exogaia.core import ExoGaia
 from exogaia.data import EpochAstrometry
@@ -28,7 +27,7 @@ class LeastSquares(ExoGaia):
     Class for least-squares model fit of epoch astrometry.
     """
 
-    @typechecked
+    @beartype
     def __init__(self, epoch_astrometry: EpochAstrometry = None) -> None:
         """
         Parameters
@@ -50,13 +49,12 @@ class LeastSquares(ExoGaia):
         self.time_end = epoch_astrometry.time_end
         self.inv_cov = np.diag(1.0 / self.data_table["centroid_pos_error_al"] ** 2)
 
-    @typechecked
     def least_squares(
         self,
         design: np.ndarray,
-        obs_pos: Optional[np.ndarray] = None,
+        obs_pos: typing.Optional[np.ndarray] = None,
         verbose: bool = True,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         """
         Method for calculating a least-squares fit for a given
         design matrix and 1D position measurements.
@@ -70,7 +68,7 @@ class LeastSquares(ExoGaia):
             position measurements are selected from the
             ``EpochAstrometry`` if  the argument is set to ``None``.
         verbose : bool
-            Print some information (default: False).
+            Print some information (default: True).
 
         Returns
         -------
@@ -93,6 +91,10 @@ class LeastSquares(ExoGaia):
         # Number of model parameters
         n_param = design.shape[1]
 
+        # Compute the normal matrix once, factorize it once, and reuse.
+        dt_cinv_d = design.T @ self.inv_cov @ design
+        dt_cinv_y = design.T @ self.inv_cov @ obs_pos
+
         # Normal equations components
         # a_matrix = design.T @ self.inv_cov @ design
         # b_matrix = design.T @ self.inv_cov @ obs_pos
@@ -110,9 +112,7 @@ class LeastSquares(ExoGaia):
         # y = obs_pos, A = design, theta = params
         # Setting delta_chi^2/delta_theta = 0
         # Solution: theta = (A^T C^-1 A)^-1 A^T C^-1 y
-        best_param = np.linalg.solve(
-            design.T @ self.inv_cov @ design, design.T @ self.inv_cov @ obs_pos
-        )
+        best_param = np.linalg.solve(dt_cinv_d, dt_cinv_y)
         best_model = design @ best_param
 
         # Fit residuals
@@ -125,7 +125,8 @@ class LeastSquares(ExoGaia):
         n_dof = n_obs - n_param
 
         # Reduced chi^2
-        chi2_red = np.sum(fit_res**2 / obs_err**2) / n_dof
+        chi2 = fit_res @ self.inv_cov @ fit_res
+        chi2_red = chi2 / n_dof
 
         # RUWE
         ruwe = np.sqrt(chi2_red)
@@ -145,7 +146,7 @@ class LeastSquares(ExoGaia):
         # param_sig = np.sqrt(np.diag(param_cov))
 
         # Parameter covariances
-        cov_matrix = np.linalg.inv(design.T @ self.inv_cov @ design)
+        cov_matrix = np.linalg.inv(dt_cinv_d)
 
         # Covariance inflation
         if infl_fact > 1.0:
@@ -154,7 +155,6 @@ class LeastSquares(ExoGaia):
         # Uncorrelated uncertainties
         param_sig = np.sqrt(np.diag(cov_matrix))
 
-        @typechecked
         def significance(
             param_1: float, param_2: float, sigma_1: float, sigma_2: float, rho: float
         ) -> float:
@@ -234,10 +234,12 @@ class LeastSquares(ExoGaia):
 
         return best_model, best_param, param_sig, ruwe
 
-    @typechecked
+    @beartype
     def singl_5param(
-        self, plot_file: Optional[str] = None
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+        self,
+        plot_file: typing.Optional[str] = None,
+        verbose: bool = True,
+    ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         """
         Method for a least-squares fit of the the epoch astrometry
         with a 5-parameter model for a single star.
@@ -247,6 +249,8 @@ class LeastSquares(ExoGaia):
         plot_file : str, None
             File name of the plot with the results. No plot
             is created when the argument is set to ``None``.
+        verbose : bool
+            Print some information (default: True).
 
         Returns
         -------
@@ -260,7 +264,8 @@ class LeastSquares(ExoGaia):
             RUWE of the fit.
         """
 
-        self.print_section("Single star (5-parameters)")
+        if verbose:
+            self.print_section("Single star (5-parameters)")
 
         # Epoch astrometry data
         obs_time = self.data_table["obs_time_tcb"].to_numpy()
@@ -281,33 +286,39 @@ class LeastSquares(ExoGaia):
             ]
         )
 
-        best_model, best_param, param_sig, ruwe = self.least_squares(design)
+        best_model, best_param, param_sig, ruwe = self.least_squares(
+            design, verbose=verbose
+        )
 
         residuals = obs_pos - best_model
 
         res_ra, res_dec = np.sin(scan_ang) * residuals, np.cos(scan_ang) * residuals
 
-        print("\nBest-fit parameters:")
-        print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
-        print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
-        print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
-        print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
-        print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
-
-        star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
-
-        delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
-            model_param=best_param, obs_time=None
-        )
-
-        time_full = np.linspace(self.time_start.jyear, self.time_end.jyear, 1000)
-        delta_ra_full, delta_dec_full, _ = star_model.calc_model(
-            model_param=best_param, obs_time=time_full
-        )
+        if verbose:
+            print("\nBest-fit parameters:")
+            print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
+            print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
+            print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
+            print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
+            print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
 
         # Create plot with residuals
 
         if plot_file is not None:
+            star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
+
+            delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
+                model_param=best_param, obs_time=None
+            )
+
+            time_full = np.linspace(
+                self.time_start.tcb.jyear, self.time_end.tcb.jyear, 1000
+            )
+
+            delta_ra_full, delta_dec_full, _ = star_model.calc_model(
+                model_param=best_param, obs_time=time_full
+            )
+
             _, axs = plt.subplots(1, 2, figsize=(14, 4), gridspec_kw={"wspace": -0.05})
 
             axs[0].set_aspect("equal", adjustable="box")
@@ -434,10 +445,12 @@ class LeastSquares(ExoGaia):
 
         return best_model, best_param, param_sig, ruwe
 
-    @typechecked
+    @beartype
     def accel_7param(
-        self, plot_file: Optional[str] = None
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+        self,
+        plot_file: typing.Optional[str] = None,
+        verbose: bool = True,
+    ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         """
         Method for a least-squares fit of the the epoch astrometry
         with a 7-parameter model for a star with a proper motion
@@ -448,6 +461,8 @@ class LeastSquares(ExoGaia):
         plot_file : str, None
             File name of the plot with the results. No plot
             is created when the argument is set to ``None``.
+        verbose : bool
+            Print some information (default: True).
 
         Returns
         -------
@@ -461,7 +476,8 @@ class LeastSquares(ExoGaia):
             RUWE of the fit.
         """
 
-        self.print_section("Binary star (7-parameters)")
+        if verbose:
+            self.print_section("Binary star (7-parameters)")
 
         # Epoch astrometry data
         obs_time = self.data_table["obs_time_tcb"].to_numpy()
@@ -484,7 +500,9 @@ class LeastSquares(ExoGaia):
             ]
         )
 
-        best_model, best_param, param_sig, ruwe = self.least_squares(design)
+        best_model, best_param, param_sig, ruwe = self.least_squares(
+            design, verbose=verbose
+        )
 
         residuals = obs_pos - best_model
 
@@ -493,52 +511,56 @@ class LeastSquares(ExoGaia):
             np.cos(scan_ang) * residuals,
         )
 
-        print("\nBest-fit parameters:")
-        print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
-        print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
-        print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
-        print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
-        print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
-        print(
-            f"   - dmu/dt in RA = {best_param[5]:.3f} +/- {param_sig[5]:.3f} mas/yr^2"
-        )
-        print(
-            f"   - dmu/dt in Dec = {best_param[6]:.3f} +/- {param_sig[6]:.3f} mas/yr^2"
-        )
-
-        # Stellar track
-
-        star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
-
-        delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
-            model_param=best_param, obs_time=None
-        )
-
-        time_full = np.linspace(self.time_start.jyear, self.time_end.jyear, 1000)
-        delta_ra_full, delta_dec_full, _ = star_model.calc_model(
-            model_param=best_param, obs_time=time_full
-        )
-
-        # Stellar track, without acceleration
-
-        star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
-
-        delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_model(
-            model_param=best_param[:5], obs_time=None
-        )
-
-        delta_ra_no_accel_full, delta_dec_no_accel_full, _ = star_no_accel.calc_model(
-            model_param=best_param[:5], obs_time=time_full
-        )
-
-        # Acceleration
-
-        delta_ra_accel = delta_ra_full - delta_ra_no_accel_full
-        delta_dec_accel = delta_dec_full - delta_dec_no_accel_full
-
-        # Create plot with residuals
+        if verbose:
+            print("\nBest-fit parameters:")
+            print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
+            print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
+            print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
+            print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
+            print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
+            print(
+                f"   - dmu/dt in RA = {best_param[5]:.3f} +/- {param_sig[5]:.3f} mas/yr^2"
+            )
+            print(
+                f"   - dmu/dt in Dec = {best_param[6]:.3f} +/- {param_sig[6]:.3f} mas/yr^2"
+            )
 
         if plot_file is not None:
+            # Stellar track
+
+            star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
+
+            delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
+                model_param=best_param, obs_time=None
+            )
+
+            time_full = np.linspace(
+                self.time_start.tcb.jyear, self.time_end.tcb.jyear, 1000
+            )
+
+            delta_ra_full, delta_dec_full, _ = star_model.calc_model(
+                model_param=best_param, obs_time=time_full
+            )
+
+            # Stellar track, without acceleration
+
+            star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
+
+            delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_model(
+                model_param=best_param[:5], obs_time=None
+            )
+
+            delta_ra_no_accel_full, delta_dec_no_accel_full, _ = (
+                star_no_accel.calc_model(model_param=best_param[:5], obs_time=time_full)
+            )
+
+            # Acceleration
+
+            delta_ra_accel = delta_ra_full - delta_ra_no_accel_full
+            delta_dec_accel = delta_dec_full - delta_dec_no_accel_full
+
+            # Create plot with residuals
+
             _, axs = plt.subplots(1, 3, figsize=(18, 4), gridspec_kw={"wspace": 0.25})
 
             # axs[0].set_aspect("equal", adjustable="box")
@@ -763,10 +785,12 @@ class LeastSquares(ExoGaia):
 
         return best_model, best_param, param_sig, ruwe
 
-    @typechecked
+    @beartype
     def accel_9param(
-        self, plot_file: Optional[str] = None
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+        self,
+        plot_file: typing.Optional[str] = None,
+        verbose: bool = True,
+    ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         """
         Method for a least-squares fit of the the epoch astrometry
         with a 9-parameter model for a star with a proper motion
@@ -777,6 +801,8 @@ class LeastSquares(ExoGaia):
         plot_file : str, None
             File name of the plot with the results. No plot
             is created when the argument is set to ``None``.
+        verbose : bool
+            Print some information (default: True).
 
         Returns
         -------
@@ -790,7 +816,8 @@ class LeastSquares(ExoGaia):
             RUWE of the fit.
         """
 
-        self.print_section("Binary star (9-parameters)")
+        if verbose:
+            self.print_section("Binary star (9-parameters)")
 
         # Epoch astrometry data
         obs_time = self.data_table["obs_time_tcb"].to_numpy()
@@ -815,7 +842,9 @@ class LeastSquares(ExoGaia):
             ]
         )
 
-        best_model, best_param, param_sig, ruwe = self.least_squares(design)
+        best_model, best_param, param_sig, ruwe = self.least_squares(
+            design, verbose=verbose
+        )
 
         residuals = obs_pos - best_model
 
@@ -824,58 +853,62 @@ class LeastSquares(ExoGaia):
             np.cos(scan_ang) * residuals,
         )
 
-        print("\nBest-fit parameters:")
-        print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
-        print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
-        print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
-        print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
-        print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
-        print(
-            f"   - dmu/dt in RA = {best_param[5]:.3f} +/- {param_sig[5]:.3f} mas/yr^2"
-        )
-        print(
-            f"   - dmu/dt in Dec = {best_param[6]:.3f} +/- {param_sig[6]:.3f} mas/yr^2"
-        )
-        print(
-            f"   - d^2mu/d^2t in RA = {best_param[7]:.3f} +/- {param_sig[7]:.3f} mas/yr^3"
-        )
-        print(
-            f"   - d^2mu/d^2t in Dec = {best_param[8]:.3f} +/- {param_sig[8]:.3f} mas/yr^3"
-        )
-
-        # Stellar track
-
-        star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
-
-        delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
-            model_param=best_param, obs_time=None
-        )
-
-        time_full = np.linspace(self.time_start.jyear, self.time_end.jyear, 1000)
-        delta_ra_full, delta_dec_full, _ = star_model.calc_model(
-            model_param=best_param, obs_time=time_full
-        )
-
-        # Stellar track, without acceleration
-
-        star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
-
-        delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_model(
-            model_param=best_param[:5], obs_time=None
-        )
-
-        delta_ra_no_accel_full, delta_dec_no_accel_full, _ = star_no_accel.calc_model(
-            model_param=best_param[:5], obs_time=time_full
-        )
-
-        # Acceleration
-
-        delta_ra_accel = delta_ra_full - delta_ra_no_accel_full
-        delta_dec_accel = delta_dec_full - delta_dec_no_accel_full
-
-        # Create plot with residuals
+        if verbose:
+            print("\nBest-fit parameters:")
+            print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
+            print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
+            print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
+            print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
+            print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
+            print(
+                f"   - dmu/dt in RA = {best_param[5]:.3f} +/- {param_sig[5]:.3f} mas/yr^2"
+            )
+            print(
+                f"   - dmu/dt in Dec = {best_param[6]:.3f} +/- {param_sig[6]:.3f} mas/yr^2"
+            )
+            print(
+                f"   - d^2mu/d^2t in RA = {best_param[7]:.3f} +/- {param_sig[7]:.3f} mas/yr^3"
+            )
+            print(
+                f"   - d^2mu/d^2t in Dec = {best_param[8]:.3f} +/- {param_sig[8]:.3f} mas/yr^3"
+            )
 
         if plot_file is not None:
+            # Stellar track
+
+            star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
+
+            delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
+                model_param=best_param, obs_time=None
+            )
+
+            time_full = np.linspace(
+                self.time_start.tcb.jyear, self.time_end.tcb.jyear, 1000
+            )
+
+            delta_ra_full, delta_dec_full, _ = star_model.calc_model(
+                model_param=best_param, obs_time=time_full
+            )
+
+            # Stellar track, without acceleration
+
+            star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
+
+            delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_model(
+                model_param=best_param[:5], obs_time=None
+            )
+
+            delta_ra_no_accel_full, delta_dec_no_accel_full, _ = (
+                star_no_accel.calc_model(model_param=best_param[:5], obs_time=time_full)
+            )
+
+            # Acceleration
+
+            delta_ra_accel = delta_ra_full - delta_ra_no_accel_full
+            delta_dec_accel = delta_dec_full - delta_dec_no_accel_full
+
+            # Create plot with residuals
+
             _, axs = plt.subplots(1, 3, figsize=(18, 4), gridspec_kw={"wspace": 0.25})
 
             # axs[0].set_aspect("equal", adjustable="box")
@@ -1103,7 +1136,10 @@ class LeastSquares(ExoGaia):
 
         return best_model, best_param, param_sig, ruwe
 
-    def orbit_grid(self, plot_file: Optional[str] = None) -> Figure:
+    @beartype
+    def orbit_grid(
+        self, plot_file: typing.Optional[str] = None, n_points: int = 50
+    ) -> Figure:
         """
         Method for exploring a grid of orbits of varying semi-major
         axis, eccentricity, and time of periastron. The semi-major
@@ -1121,6 +1157,10 @@ class LeastSquares(ExoGaia):
         plot_file : str, None
             File name of the plot with the results. No plot
             is created when the argument is set to ``None``.
+        n_points : int
+            Number of grid points in the period, eccentricity, and
+            epoch of periastron dimensions. The default is 50, so
+            calculating a grid with shape (50, 50, 50).
 
         Returns
         -------
@@ -1138,21 +1178,21 @@ class LeastSquares(ExoGaia):
         scan_ang = self.data_table["scan_pos_angle"].to_numpy()
         par_fac = self.data_table["parallax_factor_al"].to_numpy()
 
-        # Grid for the log10(a/au)
-        loga_list = np.linspace(np.log10(0.1), np.log10(30.0), 50)
+        # Grid for the log10(P/days)
+        logp_list = np.linspace(np.log10(1e1), np.log10(1e4), n_points)
 
         # Grid for the eccentricity
-        ecc_list = np.linspace(0.0, 1.0, 50, endpoint=False)
+        ecc_list = np.linspace(0.0, 1.0, n_points, endpoint=False)
 
         # Grid for the relative time of periastron
-        tau_list = np.linspace(0.0, 0.1, 50, endpoint=False)
+        tau_list = np.linspace(0.0, 0.1, n_points, endpoint=False)
 
         binary_model = BinaryModel(
             epoch_astrometry=self.epoch_astrometry, verbose=False
         )
 
-        ruwe_grid = np.zeros((loga_list.size, ecc_list.size, tau_list.size))
-        tau_grid = np.zeros((loga_list.size, ecc_list.size, tau_list.size))
+        ruwe_grid = np.zeros((logp_list.size, ecc_list.size, tau_list.size))
+        tau_grid = np.zeros((logp_list.size, ecc_list.size, tau_list.size))
 
         global_ruwe = np.inf
         # global_model = None
@@ -1160,20 +1200,13 @@ class LeastSquares(ExoGaia):
         global_sigma = None
         global_orbit = None
 
-        pbar = tqdm(total=len(loga_list) * len(ecc_list) * len(tau_list))
+        pbar = tqdm(total=len(logp_list) * len(ecc_list))
 
-        for loga_idx, loga_item in enumerate(loga_list):
+        for logp_idx, logp_item in enumerate(logp_list):
             for ecc_idx, ecc_item in enumerate(ecc_list):
                 for tau_idx, tau_item in enumerate(tau_list):
-                    # Semi-major axis (au)
-                    sma = 10.0**loga_item
-
-                    # Primary mass, ignore secondary mass (Msun)
-                    m1 = self.primary_mass[0]
-                    m2 = 0.0
-
-                    # Orbital period (days)
-                    period = np.sqrt(sma**3 / (m1 + m2)) * 365.25
+                    # Period (days)
+                    period = 10.0**logp_item
 
                     # Solve the Kepler equation
                     x_orb, y_orb = binary_model.solve_kepler(period, ecc_item, tau_item)
@@ -1203,7 +1236,7 @@ class LeastSquares(ExoGaia):
                         # global_model = best_model
                         global_param = best_param
                         global_sigma = param_sig
-                        global_orbit = [sma, ecc_item, tau_item]
+                        global_orbit = [period, ecc_item, tau_item]
 
                     # x_sky = best_param[0] * x_orb + best_param[1] * y_orb
                     # y_sky = best_param[2] * x_orb + best_param[3] * y_orb
@@ -1213,12 +1246,14 @@ class LeastSquares(ExoGaia):
                     # plt.show()
 
                     # Store RUWE as goodness-of-fit statistics
-                    ruwe_grid[loga_idx, ecc_idx, tau_idx] = ruwe
+                    ruwe_grid[logp_idx, ecc_idx, tau_idx] = ruwe
 
                     # Store tau for contour plot
-                    tau_grid[loga_idx, ecc_idx, tau_idx] = tau_item
+                    tau_grid[logp_idx, ecc_idx, tau_idx] = tau_item
 
-            pbar.update(len(ecc_list) * len(tau_list))
+                pbar.update(1)
+
+        pbar.close()
 
         # fig, ax = plt.subplots(figsize=(7, 3))
         #
@@ -1252,7 +1287,7 @@ class LeastSquares(ExoGaia):
         print(f"   - Thiele-Innes G = {global_param[6]:.3f} +/- {global_sigma[6]:.3f}")
         print(f"   - Thiele-Innes A = {global_param[7]:.3f} +/- {global_sigma[7]:.3f}")
         print(f"   - Thiele-Innes F = {global_param[8]:.3f} +/- {global_sigma[8]:.3f}")
-        print(f"   - Semi-major axis = {global_orbit[0]:.3f} au")
+        print(f"   - Period = {global_orbit[0]:.3f} days")
         print(f"   - Eccentricity = {global_orbit[1]:.3f}")
         print(f"   - Relative time of periastron = {global_orbit[2]:.2f}")
 
@@ -1264,13 +1299,13 @@ class LeastSquares(ExoGaia):
 
         min_idx = np.argmin(ruwe_grid, axis=2)
 
-        # Create a grid with the best-fit tau for each sma-ecc pair
+        # Create a grid with the best-fit tau for each period-ecc pair
 
-        tau_best = np.zeros((loga_list.size, ecc_list.size))
-        for loga_idx, loga_item in enumerate(loga_list):
+        tau_best = np.zeros((logp_list.size, ecc_list.size))
+        for logp_idx, logp_item in enumerate(logp_list):
             for ecc_idx, ecc_item in enumerate(ecc_list):
-                tau_idx = min_idx[loga_idx, ecc_idx]
-                tau_best[loga_idx, ecc_idx] = tau_grid[loga_idx, ecc_idx, tau_idx]
+                tau_idx = min_idx[logp_idx, ecc_idx]
+                tau_best[logp_idx, ecc_idx] = tau_grid[logp_idx, ecc_idx, tau_idx]
 
         # Create goodness-of-fit plot
 
@@ -1282,7 +1317,7 @@ class LeastSquares(ExoGaia):
         ax = plt.subplot(grid_spec[0, 0])
         ax_cb = plt.subplot(grid_spec[0, 1])
 
-        x_grid, y_grid = np.meshgrid(10.0**loga_list, ecc_list)
+        x_grid, y_grid = np.meshgrid(10.0**logp_list, ecc_list)
 
         # Transpose to make eccentricity rows and semi-major axis columns
 
@@ -1327,8 +1362,9 @@ class LeastSquares(ExoGaia):
         #
         # ax.clabel(cs, cs.levels, inline=True, fontsize=8, fmt="%1.1f")
 
-        ax.set_xlabel(r"$\log{a/\mathrm{au}}$")
-        ax.set_ylabel(r"Eccentricity")
+        # ax.set_xlabel(r"$\log{P/\mathrm{days}$")
+        ax.set_xlabel("Period (days)")
+        ax.set_ylabel("Eccentricity")
         ax.set_xscale("log")
 
         if plot_file is None:

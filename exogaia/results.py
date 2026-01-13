@@ -4,15 +4,13 @@ Module with the ``FitResults`` class.
 
 import pickle
 
-from typing import List, Optional
-
 import matplotlib.pyplot as plt
 import numpy as np
 
+from beartype import beartype, typing
 from corner import corner
 from matplotlib.figure import Figure
 from scipy.stats import norm
-from typeguard import typechecked
 
 from exogaia.core import ExoGaia
 from exogaia.models import BinaryModel
@@ -23,8 +21,8 @@ class FitResults(ExoGaia):
     Class for plotting fit results.
     """
 
-    @typechecked
-    def __init__(self, pickle_file: str, burnin: Optional[int] = None) -> None:
+    @beartype
+    def __init__(self, pickle_file: str, burnin: typing.Optional[int] = None) -> None:
         """
         Parameters
         ----------
@@ -103,12 +101,12 @@ class FitResults(ExoGaia):
             r"$\log{M_2/M_\odot}$",
         ]
 
-    @typechecked
+    @beartype
     def plot_walkers(
         self,
         n_walkers: int = 30,
-        thin: Optional[int] = None,
-        plot_file: Optional[str] = None,
+        thin: typing.Optional[int] = None,
+        plot_file: typing.Optional[str] = None,
     ) -> Figure:
         """
         Function for plotting the tracks by the MCMC walkers.
@@ -186,9 +184,9 @@ class FitResults(ExoGaia):
 
         return fig
 
-    @typechecked
+    @beartype
     def plot_posterior(
-        self, truths: List[float] = None, plot_file: Optional[str] = None
+        self, truths: typing.List[float] = None, plot_file: typing.Optional[str] = None
     ) -> Figure:
         """
         Function for plotting the posterior distributions.
@@ -325,8 +323,8 @@ class FitResults(ExoGaia):
 
         return fig
 
-    @typechecked
-    def plot_residuals(self, plot_file: Optional[str] = None) -> Figure:
+    @beartype
+    def plot_residuals(self, plot_file: typing.Optional[str] = None) -> Figure:
         """
         Function for plotting the residuals of the sample
         that has the maximum likelihood.
@@ -384,8 +382,8 @@ class FitResults(ExoGaia):
 
         return fig
 
-    @typechecked
-    def plot_orbit(self, plot_file: Optional[str] = None) -> Figure:
+    @beartype
+    def plot_orbit(self, plot_file: typing.Optional[str] = None) -> Figure:
         """
         Function for plotting the stellar orbit based on the
         parameters with the maximum likelihood.
@@ -412,15 +410,15 @@ class FitResults(ExoGaia):
         best_params = self.samples[max_idx, :]
 
         period = np.sqrt(best_params[5] ** 3 / best_params[11]) * 365.25
-        obs_time = np.linspace(0.0, period, 1000)
+        rel_time_day = np.linspace(0.0, period, 1000)
 
         bin_model = BinaryModel(epoch_astrometry=self.epoch_astrometry, verbose=False)
 
         delta_ra_full, delta_dec_full = bin_model.calc_orbit(
-            best_params, obs_time=obs_time
+            best_params, rel_time_day=rel_time_day
         )
 
-        delta_ra, delta_dec = bin_model.calc_orbit(best_params, obs_time=None)
+        delta_ra, delta_dec = bin_model.calc_orbit(best_params, rel_time_day=None)
         residuals = bin_model.calc_residuals(best_params)
 
         self.print_section("Plot orbit")

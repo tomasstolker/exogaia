@@ -7,15 +7,13 @@ import pickle
 import sys
 import warnings
 
-from typing import Optional, Tuple, Union
-
 import dynesty
 import emcee
 import numpy as np
 import reddemcee
 
+from beartype import beartype, typing
 from schwimmbad import MPIPool
-from typeguard import typechecked
 
 from exogaia.core import ExoGaia
 from exogaia.data import EpochAstrometry
@@ -35,7 +33,7 @@ class NestedSampler(ExoGaia):
     Class for nested sampling with ``MultiNest`` and ``Dynesty``.
     """
 
-    @typechecked
+    @beartype
     def __init__(self, epoch_astrometry: EpochAstrometry) -> None:
         """
         Parameters
@@ -67,7 +65,7 @@ class NestedSampler(ExoGaia):
         # Number of model parameters
         self.n_params = 5 + 8
 
-    @typechecked
+    @beartype
     def set_priors(self) -> None:
         """
         Method for setting the default parameter priors.
@@ -106,7 +104,7 @@ class NestedSampler(ExoGaia):
         )
         self.priors["mass_2"] = LogUniformPrior(1e-3, 1.0)
 
-    @typechecked
+    @beartype
     def prior_transform(self, cube):
         """
         Method for transforming the unit cube into a cube
@@ -189,8 +187,8 @@ class NestedSampler(ExoGaia):
 
         return cube
 
-    @typechecked
-    def log_likelihood(self, params) -> Union[np.float64, float]:
+    @beartype
+    def log_likelihood(self, params) -> typing.Union[np.float64, float]:
         """
         Method for calculating the log-likelihood for the
         sampled parameter cube.
@@ -222,14 +220,14 @@ class NestedSampler(ExoGaia):
 
         return -0.5 * np.sum(res**2 / var)
 
-    @typechecked
+    @beartype
     def run_multinest(
         self,
         pickle_file: str = "exogaia.pkl",
         n_live_points: int = 500,
         resume: bool = False,
         output_folder: str = "multinest/",
-        kwargs_multinest: Optional[dict] = None,
+        kwargs_multinest: typing.Optional[dict] = None,
     ) -> None:
         """
         Function to run the ``PyMultiNest`` wrapper of the
@@ -343,7 +341,7 @@ class NestedSampler(ExoGaia):
         if mpi_rank == 0 and not os.path.exists(self.output_folder):
             os.mkdir(self.output_folder)
 
-        @typechecked
+        @beartype
         def log_prior_multinest(cube, n_dim: int, n_param: int) -> None:
             """
             Function to transform the unit cube into the parameter
@@ -367,10 +365,10 @@ class NestedSampler(ExoGaia):
 
             self.prior_transform(cube)
 
-        @typechecked
+        @beartype
         def log_like_multinest(
             params, n_dim: int, n_param: int
-        ) -> Union[float, np.float64]:
+        ) -> typing.Union[float, np.float64]:
             """
             Method for calculating the log-likelihood for the
             sampled parameter cube.
@@ -456,7 +454,7 @@ class NestedSampler(ExoGaia):
             with open(pickle_file, "wb") as open_file:
                 pickle.dump(pickle_data, open_file, protocol=pickle.HIGHEST_PROTOCOL)
 
-    @typechecked
+    @beartype
     def run_dynesty(
         self,
         n_live_points: int = 500,
@@ -466,7 +464,7 @@ class NestedSampler(ExoGaia):
         dynamic: bool = False,
         sample_method: str = "auto",
         bound: str = "multi",
-        n_pool: Optional[int] = None,
+        n_pool: typing.Optional[int] = None,
         mpi_pool: bool = False,
     ) -> None:
         """
@@ -782,7 +780,7 @@ class MCMCSampler(ExoGaia):
     Class for MCMC sampling with ``emcee`` and ``reddemcee``.
     """
 
-    @typechecked
+    @beartype
     def __init__(self, epoch_astrometry: EpochAstrometry) -> None:
         """
         Parameters
@@ -829,7 +827,7 @@ class MCMCSampler(ExoGaia):
             "mass_2": 12,
         }
 
-    @typechecked
+    @beartype
     def set_priors(self) -> None:
         """
         Method for setting the default parameter priors.
@@ -868,7 +866,7 @@ class MCMCSampler(ExoGaia):
         )
         self.priors["mass_2"] = UniformPrior(0.0, 1.0)
 
-    @typechecked
+    @beartype
     def log_prior(self, params: np.ndarray) -> float:
         """
         Method for the log-prior used by the MCMC.
@@ -932,6 +930,7 @@ class MCMCSampler(ExoGaia):
 
         return log_prior
 
+    @beartype
     def log_likelihood(self, params: np.ndarray) -> float:
         """
         Method for the log-likelihood used by the MCMC.
@@ -964,8 +963,8 @@ class MCMCSampler(ExoGaia):
 
         return -0.5 * np.sum(res**2 / var)
 
-    @typechecked
-    def log_probability(self, params: np.ndarray) -> Tuple[float, float]:
+    @beartype
+    def log_probability(self, params: np.ndarray) -> typing.Tuple[float, float]:
         """
         Method for the log-probability used by the MCMC.
 
@@ -994,7 +993,7 @@ class MCMCSampler(ExoGaia):
 
         return log_prob, log_prior
 
-    @typechecked
+    @beartype
     def run_mcmc(
         self,
         pickle_file: str = "exogaia.pkl",
@@ -1055,7 +1054,7 @@ class MCMCSampler(ExoGaia):
         with open(pickle_file, "wb") as open_file:
             pickle.dump(pickle_data, open_file, protocol=pickle.HIGHEST_PROTOCOL)
 
-    @typechecked
+    @beartype
     def run_ptmcmc(
         self,
         pickle_file: str = "exogaia.pkl",

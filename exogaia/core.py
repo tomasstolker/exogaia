@@ -2,7 +2,7 @@
 Module with the ``ExoGaia`` abstract interface.
 """
 
-from typeguard import typechecked
+from beartype import beartype
 
 
 class ExoGaia:
@@ -11,7 +11,7 @@ class ExoGaia:
     """
 
     @staticmethod
-    @typechecked
+    @beartype
     def print_section(
         sect_title: str,
         bound_char: str = "-",
