@@ -28,6 +28,14 @@ exogaia.leastsq module
    :show-inheritance:
    :undoc-members:
 
+exogaia.limits module
+---------------------
+
+.. automodule:: exogaia.limits
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 exogaia.models module
 ---------------------
 

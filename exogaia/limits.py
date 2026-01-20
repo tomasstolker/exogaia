@@ -1,14 +1,17 @@
 """
-Module with the ``Completeness`` class.
+Module with the ``CompletenessMap`` class.
 """
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from astropy import units as u
-from astropy.io import fits
+
+# from astropy.io import fits
 from beartype import beartype, typing
 from matplotlib.figure import Figure
+from scipy.ndimage import gaussian_filter
+
 from tqdm.auto import tqdm
 
 from exogaia.core import ExoGaia
@@ -18,9 +21,9 @@ from exogaia.leastsq import LeastSquares
 
 class CompletenessMap(ExoGaia):
     """
-    Class for computing a completeness map of detecting a proper
-    motion acceleration as function of planetary mass and
-    semi-major axis.
+    Class for computing a completeness map of detecting a
+    proper motion acceleration as function of planetary
+    mass and semi-major axis.
     """
 
     @beartype
@@ -64,20 +67,17 @@ class CompletenessMap(ExoGaia):
         n_samples: int = 30,
         mass_points: typing.Optional[np.ndarray] = None,
         sma_points: typing.Optional[np.ndarray] = None,
+        filter_sigma: typing.Optional[float] = None,
         plot_file: typing.Optional[str] = None,
     ) -> Figure:
         """
-        Compute and plot an astrometric acceleration completeness map.
-
-        This method estimates the detection completeness for companions by
-        Monte Carlo simulation of astrometric time series. For each point
-        on a grid of companion mass and semi-major axis, synthetic astrometric
-        data are generated multiple times, a 9-parameter acceleration model
-        is fit, and the fraction of realizations with a significant detected
-        acceleration is recorded.
-
-        The detection criterion is defined by the signal-to-noise ratio of the
-        total sky-plane acceleration exceeding ``n_sigma``.
+        Compute and plot a completeness map for astrometric
+        accelerations. This method estimates the detection
+        completeness by sampling random orbits for a grid of
+        companion masses and semi-major axes. A 9-parameter
+        acceleration model is fit, and the fraction of
+        realizations with a detection significance larger
+        than ``n_sigma`` adopted as completeness.
 
         Parameters
         ----------
@@ -93,6 +93,13 @@ class CompletenessMap(ExoGaia):
         sma_points : numpy.ndarray or None, optional
             Grid of semi-major axes in astronomical units. If None, a logarithmic
             grid between 0.1 and 100 au is used.
+        filter_sigma : float, None
+            Width of the optional Gaussian filter that is applied to
+            smooth away the Monte Carlo sampling noise. The width is
+            in number of grid points, so a value of 1.0 works usually
+            well if for example the number of grid points is 50 in
+            both the mass and semi-major axis dimension. No filter is
+            applied if the argument is set to ``None``.
         plot_file : str or None, optional
             If provided, the completeness map is saved to this file. If None,
             the plot is shown interactively.
@@ -142,18 +149,28 @@ class CompletenessMap(ExoGaia):
 
                     least_sq = LeastSquares(epoch_astrometry=self.epoch_astrom)
 
-                    _, best_param, param_sig, ruwe = least_sq.accel_9param(
+                    _, best_param, param_cov, _ = least_sq.accel_9param(
                         plot_file=None, verbose=False
                     )
 
                     # Acceleration dmu/dt (mas/yr^2)
-
+                    # Quadratic sum of the RA and Dec components
                     accel = np.sqrt(best_param[5] ** 2 + best_param[6] ** 2)
 
-                    sigma_accel = np.sqrt(
-                        (best_param[5] / accel) ** 2 * param_sig[5] ** 2
-                        + (best_param[6] / accel) ** 2 * param_sig[6] ** 2
+                    # Gradient with respect to the RA and Dec components
+                    # So delta(a)/delta(a_RA) and delta(a)/delta(a_Dec)
+                    # with a = sqrt(a_RA^2 + a_Dec^2)
+                    grad_accel = np.array(
+                        [best_param[5] / accel, best_param[6] / accel]
                     )
+
+                    # Covariance matrix for acceleration in RA and Dec
+                    cov_accel = param_cov[5:7, 5:7]
+
+                    # Propagate RA and Dec acceleration uncertainty into
+                    # uncertainty on total acceleration, while folding in
+                    # the covariances between the RA and Dec acceleration
+                    sigma_accel = np.sqrt(grad_accel @ cov_accel @ grad_accel)
 
                     if accel / sigma_accel > n_sigma:
                         compl_map[m2_idx, sma_idx] += 1.0 / float(n_samples)
@@ -162,6 +179,10 @@ class CompletenessMap(ExoGaia):
 
         # fits.writeto("test.fits", compl_map, overwrite=True)
         # compl_map = fits.getdata("test.fits")
+
+        if filter_sigma is not None:
+            # Apply Gaussian filter to smooth out Monte Carlo noise
+            compl_map = gaussian_filter(compl_map, sigma=filter_sigma)
 
         fig, ax = plt.subplots(figsize=(5, 3))
 
@@ -177,9 +198,7 @@ class CompletenessMap(ExoGaia):
         ax.set_xlabel("Semi-major axis (au)", fontsize=12)
         ax.set_ylabel(r"Companion mass ($M_\mathrm{J}$)", fontsize=12)
         ax.set_xscale("log")
-        ax.set_title(
-            rf"Acceleration completeness ($N_\sigma = {n_sigma}$)", fontsize=10.0
-        )
+        ax.set_title(rf"${n_sigma}\sigma$ acceleration completeness", fontsize=10.0)
 
         if plot_file is None:
             plt.show()

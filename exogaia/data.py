@@ -163,7 +163,7 @@ class EpochAstrometry(ExoGaia):
         pmdec: typing.Optional[float] = None,
         phot_g_mean_mag: typing.Optional[float] = None,
         reject_fraction: typing.Optional[float] = None,
-        occ_rate: typing.Optional[typing.Callable] = None,
+        occ_func: typing.Optional[typing.Callable] = None,
         verbose: bool = True,
     ) -> typing.List[float]:
         """
@@ -221,7 +221,7 @@ class EpochAstrometry(ExoGaia):
             FOV transits has an issue (see Lindegren et al. 2021).
             The default is ``None``, in which case no data
             is rejected.
-        occ_rate : Callable, None
+        occ_func : Callable, None
             Function that calculates the planet occurrence rate for
             a given primary mass (Msun) and semi-major-axis (au).
             This function is used if ``sma`` is set to ``None``.
@@ -270,6 +270,7 @@ class EpochAstrometry(ExoGaia):
         def planet_occurrence(
             sma_planet: float,
             mass_star: float,
+            mass_planet: float,
         ) -> float:
             """
             Planet occurrence-rate density as given by Equation 5
@@ -286,6 +287,8 @@ class EpochAstrometry(ExoGaia):
                 Semi-major axis of the planet orbit (au).
             mass_star : float
                 Primary mass (Msun).
+            mass_planet : float
+                Secondary mass (Msun).
 
             Returns
             -------
@@ -293,14 +296,24 @@ class EpochAstrometry(ExoGaia):
                 Planet occurrence-rate density.
             """
 
-            # Validity ranges
+            # Planetary mass range (Mearth)
             m_min, m_max = 30.0, 6000.0
+
+            mass_planet_earth = (mass_planet * u.M_sun).to(u.M_earth)
+
+            if mass_planet_earth < m_min | mass_planet_earth > m_max:
+                warnings.warn(
+                    "The argument of 'mass_planet' is outside the "
+                    "calibrated range: ({m_min}, {m_max}) Mearth."
+                )
+
+            # Semi-major axis range
             a_min, a_max = 0.03, 30.0
 
-            if np.any((sma_planet <= a_min) | (sma_planet > a_max)):
+            if sma_planet < a_min | sma_planet > a_max:
                 warnings.warn(
-                    "Semi-major axis outside calibrated range " f"(0, {a_max}] AU.",
-                    UserWarning,
+                    "The argument of 'sma_planet' is outside the "
+                    "calibrated range: ({a_min}, {a_max}) au."
                 )
 
             # Broken powerlaw parameters (Fulton et al. 2021)
@@ -675,7 +688,9 @@ class EpochAstrometry(ExoGaia):
 
         gaia_query = f"""
         SELECT ra, ra_error, dec, dec_error, parallax, parallax_error,
-               pmra, pmra_error, pmdec, pmdec_error, phot_g_mean_mag
+               pmra, pmra_error, pmdec, pmdec_error, phot_g_mean_mag,
+               astrometric_chi2_al, astrometric_n_good_obs_al, ruwe,
+               astrometric_excess_noise, non_single_star
         FROM gaia{gaia_release.lower()}.gaia_source
         WHERE source_id = {source_id}
         """
@@ -696,12 +711,12 @@ class EpochAstrometry(ExoGaia):
         pmdec_error = float(gaia_result["pmdec_error"])
         phot_g_mean_mag = float(gaia_result["phot_g_mean_mag"])
 
-        print(f"\nRA: {ra:.3f} deg +/- {ra_error:.3f} mas")
-        print(f"Dec: {dec:.3f} deg +/- {dec_error:.3f} mas")
-        print(f"Parallax: {parallax:.3f} +/- {parallax_error:.3f} mas")
-        print(f"Proper motion in RA: {pmra:.3f} +/- {pmra_error:.3f} mas/yr")
-        print(f"Proper motion in Dec: {pmdec:.3f} +/- {pmdec_error:.3f} mas/yr")
-        print(f"G-band magnitude: {phot_g_mean_mag:.3f}")
+        print(f"\nRA = {ra:.3f} deg +/- {ra_error:.3f} mas")
+        print(f"Dec = {dec:.3f} deg +/- {dec_error:.3f} mas")
+        print(f"Parallax = {parallax:.3f} +/- {parallax_error:.3f} mas")
+        print(f"Proper motion in RA = {pmra:.3f} +/- {pmra_error:.3f} mas/yr")
+        print(f"Proper motion in Dec = {pmdec:.3f} +/- {pmdec_error:.3f} mas/yr")
+        print(f"G-band magnitude = {phot_g_mean_mag:.3f}")
 
         self.ra = ra
         self.dec = dec
@@ -709,6 +724,26 @@ class EpochAstrometry(ExoGaia):
         self.pmra = pmra
         self.pmdec = pmdec
         self.phot_g_mean_mag = phot_g_mean_mag
+
+        uwe = np.sqrt(
+            gaia_result["astrometric_chi2_al"]
+            / (gaia_result["astrometric_n_good_obs_al"] - 5.0)
+        )
+
+        print(f"\nUWE = {uwe:.2f}")
+
+        if "ruwe" in gaia_result.columns:
+            if not np.ma.is_masked(gaia_result["ruwe"]):
+                print(f"RUWE = {gaia_result['ruwe']:.2f}")
+
+        if "astrometric_excess_noise" in gaia_result.columns:
+            if not np.ma.is_masked(gaia_result["astrometric_excess_noise"]):
+                aen = gaia_result["astrometric_excess_noise"]
+                print(f"Astrometric excess noise (mas) = {aen:.2f}")
+
+        if "non_single_star" in gaia_result.columns:
+            if not np.ma.is_masked(gaia_result["non_single_star"]):
+                print(f"Non single star = {bool(gaia_result['non_single_star'])}")
 
         return [ra, dec, parallax, pmra, pmdec, phot_g_mean_mag]
 

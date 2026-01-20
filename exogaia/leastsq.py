@@ -14,7 +14,7 @@ from matplotlib.colorbar import Colorbar
 # from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 
-# from scipy.linalg import cho_factor, cho_solve
+from scipy.linalg import cho_factor, cho_solve
 from tqdm.auto import tqdm
 
 from exogaia.core import ExoGaia
@@ -77,7 +77,7 @@ class LeastSquares(ExoGaia):
         np.ndarray
             Array with the best-fit parameters
         np.ndarray
-            Array with the parameter uncertainties.
+            Array with the parameter covariance matrix.
         float
             RUWE of the fit.
         """
@@ -86,34 +86,36 @@ class LeastSquares(ExoGaia):
         if obs_pos is None:
             obs_pos = self.data_table["centroid_pos_al"].to_numpy()
 
-        obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
+        # obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
 
         # Number of model parameters
         n_param = design.shape[1]
 
-        # Compute the normal matrix once, factorize it once, and reuse.
+        # Normal matrix equations
+        # Symmetric positive definite
         dt_cinv_d = design.T @ self.inv_cov @ design
         dt_cinv_y = design.T @ self.inv_cov @ obs_pos
 
-        # Normal equations components
-        # a_matrix = design.T @ self.inv_cov @ design
-        # b_matrix = design.T @ self.inv_cov @ obs_pos
-
         # Cholesky factorization
         # a_matrix = cho_fac cho_fac^T
-        # cho_fac = cho_factor(a_matrix, lower=True)
+        cho_fac = cho_factor(dt_cinv_d, lower=True)
 
         # Solves (a_matrix cho_fac) = b_matrix
-        # best_param = cho_solve(cho_fac, b_matrix)
-        # best_model = design @ best_param
+        best_param = cho_solve(cho_fac, dt_cinv_y)
+        best_model = design @ best_param
+
+        # Parameter covariances
+        cov_matrix = cho_solve(cho_fac, np.eye(n_param))
 
         # Linear model: obs_pos = design x best_param
         # Minimize weighted chi^2: chi^2 = (y - A theta)^T C^-1 (y - A theta)
         # y = obs_pos, A = design, theta = params
         # Setting delta_chi^2/delta_theta = 0
         # Solution: theta = (A^T C^-1 A)^-1 A^T C^-1 y
-        best_param = np.linalg.solve(dt_cinv_d, dt_cinv_y)
-        best_model = design @ best_param
+        # This is slower than cho_factor + cho_solve
+        # best_param = np.linalg.solve(dt_cinv_d, dt_cinv_y)
+        # best_model = design @ best_param
+        # cov_matrix = np.linalg.inv(dt_cinv_d)
 
         # Fit residuals
         fit_res = obs_pos - best_model
@@ -144,9 +146,6 @@ class LeastSquares(ExoGaia):
         # Parameter covariances
         # param_cov = cho_solve(cho_fac, np.eye(a_matrix.shape[0]))
         # param_sig = np.sqrt(np.diag(param_cov))
-
-        # Parameter covariances
-        cov_matrix = np.linalg.inv(dt_cinv_d)
 
         # Covariance inflation
         if infl_fact > 1.0:
@@ -232,7 +231,7 @@ class LeastSquares(ExoGaia):
             if sig_9param is not None:
                 print(f"Significance d^2mu/d^2t = {sig_9param:.3f}")
 
-        return best_model, best_param, param_sig, ruwe
+        return best_model, best_param, cov_matrix, ruwe
 
     @beartype
     def singl_5param(
@@ -259,7 +258,7 @@ class LeastSquares(ExoGaia):
         np.ndarray
             Array with the best-fit parameters
         np.ndarray
-            Array with the parameter uncertainties.
+            Array with the parameter covariance matrix.
         float
             RUWE of the fit.
         """
@@ -286,9 +285,11 @@ class LeastSquares(ExoGaia):
             ]
         )
 
-        best_model, best_param, param_sig, ruwe = self.least_squares(
+        best_model, best_param, param_cov, ruwe = self.least_squares(
             design, verbose=verbose
         )
+
+        param_sig = np.sqrt(np.diag(param_cov))
 
         residuals = obs_pos - best_model
 
@@ -443,7 +444,7 @@ class LeastSquares(ExoGaia):
 
             plt.savefig(plot_file)
 
-        return best_model, best_param, param_sig, ruwe
+        return best_model, best_param, param_cov, ruwe
 
     @beartype
     def accel_7param(
@@ -471,7 +472,7 @@ class LeastSquares(ExoGaia):
         np.ndarray
             Array with the best-fit parameters
         np.ndarray
-            Array with the parameter uncertainties.
+            Array with the parameter covariance matrix.
         float
             RUWE of the fit.
         """
@@ -500,9 +501,11 @@ class LeastSquares(ExoGaia):
             ]
         )
 
-        best_model, best_param, param_sig, ruwe = self.least_squares(
+        best_model, best_param, param_cov, ruwe = self.least_squares(
             design, verbose=verbose
         )
+
+        param_sig = np.sqrt(np.diag(param_cov))
 
         residuals = obs_pos - best_model
 
@@ -783,7 +786,7 @@ class LeastSquares(ExoGaia):
 
             plt.savefig(plot_file)
 
-        return best_model, best_param, param_sig, ruwe
+        return best_model, best_param, param_cov, ruwe
 
     @beartype
     def accel_9param(
@@ -811,7 +814,7 @@ class LeastSquares(ExoGaia):
         np.ndarray
             Array with the best-fit parameters
         np.ndarray
-            Array with the parameter uncertainties.
+            Array with the parameter covariance matrix.
         float
             RUWE of the fit.
         """
@@ -842,9 +845,11 @@ class LeastSquares(ExoGaia):
             ]
         )
 
-        best_model, best_param, param_sig, ruwe = self.least_squares(
+        best_model, best_param, param_cov, ruwe = self.least_squares(
             design, verbose=verbose
         )
+
+        param_sig = np.sqrt(np.diag(param_cov))
 
         residuals = obs_pos - best_model
 
@@ -1134,7 +1139,7 @@ class LeastSquares(ExoGaia):
 
             plt.savefig(plot_file)
 
-        return best_model, best_param, param_sig, ruwe
+        return best_model, best_param, param_cov, ruwe
 
     @beartype
     def orbit_grid(
@@ -1227,9 +1232,11 @@ class LeastSquares(ExoGaia):
                         ]
                     )
 
-                    best_model, best_param, param_sig, ruwe = self.least_squares(
+                    best_model, best_param, param_cov, ruwe = self.least_squares(
                         design, obs_pos=obs_pos, verbose=False
                     )
+
+                    param_sig = np.sqrt(np.diag(param_cov))
 
                     if ruwe < global_ruwe:
                         global_ruwe = ruwe
