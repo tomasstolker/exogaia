@@ -2,11 +2,11 @@
 .DS_Store
 exogaia/_version.py
 docs/_build/
-docs/.ipynb_checkpoints/
-docs/multinest/
-docs/exogaia.pkl
-docs/*.png
-docs/*.csv
+docs/tutorials/.ipynb_checkpoints/
+docs/tutorials/multinest/
+docs/tutorials/exogaia.pkl
+docs/tutorials/*.png
+docs/tutorials/*.csv
 build/
 dist/
 exogaia.egg-info/

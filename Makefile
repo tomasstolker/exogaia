@@ -42,11 +42,11 @@ clean:
 	rm -f coverage.xml
 	rm -rf .pytest_cache/
 	rm -rf docs/_build/
-	rm -rf docs/.ipynb_checkpoints/
-	rm -rf docs/multinest/
-	rm -f docs/*.png
-	rm -f docs/*.csv
-	rm -f docs/exogaia.pkl
+	rm -rf docs/tutorials/.ipynb_checkpoints/
+	rm -rf docs/tutorials/multinest/
+	rm -f docs/tutorials/*.png
+	rm -f docs/tutorials/*.csv
+	rm -f docs/tutorials/exogaia.pkl
 	rm -rf build/
 	rm -rf dist/
 	rm -rf exogaia.egg-info/

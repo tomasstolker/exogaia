@@ -47,6 +47,8 @@ class NestedSampler(ExoGaia):
             None
         """
 
+        self.print_section("Nested sampler")
+
         self.epoch_astrometry = epoch_astrometry
         self.data_table = epoch_astrometry.data_table
         self.primary_mass = epoch_astrometry.primary_mass
@@ -88,8 +90,8 @@ class NestedSampler(ExoGaia):
         if ruwe > 1.1:
             _, best_param, _, ruwe = least_sq.accel_9param()
 
-        self.priors["ra"] = NormalPrior(best_param[0], 0.1)
-        self.priors["dec"] = NormalPrior(best_param[1], 0.1)
+        self.priors["ra_offset"] = NormalPrior(best_param[0], 0.1)
+        self.priors["dec_offset"] = NormalPrior(best_param[1], 0.1)
         self.priors["parallax"] = NormalPrior(best_param[2], 0.1)
         self.priors["pmra"] = NormalPrior(best_param[3], 0.1)
         self.priors["pmdec"] = NormalPrior(best_param[4], 0.1)
@@ -121,10 +123,12 @@ class NestedSampler(ExoGaia):
             Output cube with sampled model parameters.
         """
 
-        # delta_RA, delta_Dec (mas)
+        # RA/Dec offset at Gaia reference epoch
+        # relative to the Gaia coordinates of the
+        # source at the reference epoch (mas)
         # Default: uniform [-10, 10]
-        cube[0] = self.priors["ra"].draw_samples(1)
-        cube[1] = self.priors["dec"].draw_samples(1)
+        cube[0] = self.priors["ra_offset"].draw_samples(1)
+        cube[1] = self.priors["dec_offset"].draw_samples(1)
 
         # Parallax (mas)
         # Default: uniform [0, 100]
@@ -279,7 +283,7 @@ class NestedSampler(ExoGaia):
 
         import pymultinest
 
-        self.print_section("Orbit fit with MultiNest")
+        self.print_section("Run MultiNest")
 
         self.output_folder = output_folder
 
@@ -517,7 +521,7 @@ class NestedSampler(ExoGaia):
             None
         """
 
-        self.print_section("Orbit fit with Dynesty")
+        self.print_section("Run Dynesty")
 
         self.output_folder = output_folder
 
@@ -794,6 +798,8 @@ class MCMCSampler(ExoGaia):
             None
         """
 
+        self.print_section("MCMC sampler")
+
         self.epoch_astrometry = epoch_astrometry
         self.data_table = epoch_astrometry.data_table
         self.primary_mass = epoch_astrometry.primary_mass
@@ -812,8 +818,8 @@ class MCMCSampler(ExoGaia):
 
         # Parameter index numbers
         self.param_indices = {
-            "ra": 0,
-            "dec": 1,
+            "ra_offset": 0,
+            "dec_offset": 1,
             "parallax": 2,
             "pmra": 3,
             "pmdec": 4,
@@ -850,8 +856,8 @@ class MCMCSampler(ExoGaia):
         if ruwe > 1.1:
             _, best_param, _, ruwe = least_sq.accel_9param()
 
-        self.priors["ra"] = NormalPrior(best_param[0], 0.1)
-        self.priors["dec"] = NormalPrior(best_param[1], 0.1)
+        self.priors["ra_offset"] = NormalPrior(best_param[0], 0.1)
+        self.priors["dec_offset"] = NormalPrior(best_param[1], 0.1)
         self.priors["parallax"] = NormalPrior(best_param[2], 0.1)
         self.priors["pmra"] = NormalPrior(best_param[3], 0.1)
         self.priors["pmdec"] = NormalPrior(best_param[4], 0.1)
@@ -999,7 +1005,7 @@ class MCMCSampler(ExoGaia):
         pickle_file: str = "exogaia.pkl",
         n_walkers: int = 200,
         n_steps: int = 1000,
-        progress: bool = False,
+        progress: bool = True,
     ) -> None:
         """
         Method for running the MCMC ensemble sampler of ``emcee``.
@@ -1021,6 +1027,8 @@ class MCMCSampler(ExoGaia):
         NoneType
             None
         """
+
+        self.print_section("Run emcee")
 
         sampler = emcee.EnsembleSampler(
             nwalkers=n_walkers,
@@ -1062,7 +1070,7 @@ class MCMCSampler(ExoGaia):
         n_walkers: int = 200,
         n_steps: int = 1000,
         n_sweeps: int = 10,
-        progress: bool = False,
+        progress: bool = True,
     ) -> None:
         """
         Method for running the adaptive parallel tempering tempered
@@ -1089,6 +1097,8 @@ class MCMCSampler(ExoGaia):
         NoneType
             None
         """
+
+        self.print_section("Run reddemcee")
 
         sampler = reddemcee.PTSampler(
             nwalkers=n_walkers,

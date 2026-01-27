@@ -15,6 +15,7 @@ from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
 
 from scipy.linalg import cho_factor, cho_solve
+from scipy.optimize import brentq
 from tqdm.auto import tqdm
 
 from exogaia.core import ExoGaia
@@ -47,7 +48,8 @@ class LeastSquares(ExoGaia):
         self.ref_epoch = epoch_astrometry.ref_epoch
         self.time_start = epoch_astrometry.time_start
         self.time_end = epoch_astrometry.time_end
-        self.inv_cov = np.diag(1.0 / self.data_table["centroid_pos_error_al"] ** 2)
+        pos_err = self.data_table["centroid_pos_error_al"].to_numpy()
+        self.inv_cov = np.diag(1.0 / pos_err**2)
 
     def least_squares(
         self,
@@ -131,7 +133,10 @@ class LeastSquares(ExoGaia):
         chi2_red = chi2 / n_dof
 
         # RUWE
-        ruwe = np.sqrt(chi2_red)
+        if self.epoch_astrometry.sim_data:
+            ruwe = np.sqrt(chi2_red)
+        else:
+            ruwe = np.sqrt(chi2_red) / self.epoch_astrometry.u0_norm
 
         # F2 estimator, which obeys a normal distribution N(0,1)
         # See Equation 1 in Halbwachs et al. (2023)
@@ -271,17 +276,18 @@ class LeastSquares(ExoGaia):
         obs_pos = self.data_table["centroid_pos_al"].to_numpy()
         obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
         rel_yr = self.data_table["relative_time_year"].to_numpy()
-        scan_ang = self.data_table["scan_pos_angle"].to_numpy()
+        sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
+        cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
         par_fac = self.data_table["parallax_factor_al"].to_numpy()
 
         # Design matrix for least-squares fit
         design = np.column_stack(
             [
-                np.sin(scan_ang),
-                np.cos(scan_ang),
+                sin_scan_ang,
+                cos_scan_ang,
                 par_fac,
-                rel_yr * np.sin(scan_ang),
-                rel_yr * np.cos(scan_ang),
+                rel_yr * sin_scan_ang,
+                rel_yr * cos_scan_ang,
             ]
         )
 
@@ -293,12 +299,12 @@ class LeastSquares(ExoGaia):
 
         residuals = obs_pos - best_model
 
-        res_ra, res_dec = np.sin(scan_ang) * residuals, np.cos(scan_ang) * residuals
+        res_ra, res_dec = sin_scan_ang * residuals, cos_scan_ang * residuals
 
         if verbose:
             print("\nBest-fit parameters:")
-            print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
-            print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
+            print(f"   - RA offset = {best_param[0]:.3f} +/- {param_sig[0]:.3f} mas")
+            print(f"   - Dec offset = {best_param[1]:.3f} +/- {param_sig[1]:.3f} mas")
             print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
             print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
             print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
@@ -308,7 +314,7 @@ class LeastSquares(ExoGaia):
         if plot_file is not None:
             star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
 
-            delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
+            delta_ra_obs, delta_dec_obs, _ = star_model.calc_2d_model(
                 model_param=best_param, obs_time=None
             )
 
@@ -316,7 +322,7 @@ class LeastSquares(ExoGaia):
                 self.time_start.tcb.jyear, self.time_end.tcb.jyear, 1000
             )
 
-            delta_ra_full, delta_dec_full, _ = star_model.calc_model(
+            delta_ra_full, delta_dec_full, _ = star_model.calc_2d_model(
                 model_param=best_param, obs_time=time_full
             )
 
@@ -371,8 +377,10 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"RA = {best_param[0]:.3f} deg $\pm$ {param_sig[0]:.3f} mas" + "\n"
-                rf"Dec = {best_param[1]:.3f} deg $\pm$ {param_sig[1]:.3f} mas" + "\n"
+                rf"$\Delta$RA = {best_param[0]:.3f} mas $\pm$ {param_sig[0]:.3f} mas"
+                + "\n"
+                rf"$\Delta$Dec = {best_param[1]:.3f} mas $\pm$ {param_sig[1]:.3f} mas"
+                + "\n"
                 rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas" + "\n"
                 rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
@@ -430,7 +438,6 @@ class LeastSquares(ExoGaia):
 
             axs[1].set_xlabel("Time (yr)")
             axs[1].set_ylabel("Residuals (mas)")
-            axs[1].invert_xaxis()
 
             axs[1].text(
                 0.03,
@@ -485,19 +492,20 @@ class LeastSquares(ExoGaia):
         obs_pos = self.data_table["centroid_pos_al"].to_numpy()
         obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
         rel_yr = self.data_table["relative_time_year"].to_numpy()
-        scan_ang = self.data_table["scan_pos_angle"].to_numpy()
+        sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
+        cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
         par_fac = self.data_table["parallax_factor_al"].to_numpy()
 
         # Design matrix for least-squares fit
         design = np.column_stack(
             [
-                np.sin(scan_ang),
-                np.cos(scan_ang),
+                sin_scan_ang,
+                cos_scan_ang,
                 par_fac,
-                rel_yr * np.sin(scan_ang),
-                rel_yr * np.cos(scan_ang),
-                0.5 * rel_yr**2 * np.sin(scan_ang),
-                0.5 * rel_yr**2 * np.cos(scan_ang),
+                rel_yr * sin_scan_ang,
+                rel_yr * cos_scan_ang,
+                0.5 * rel_yr**2 * sin_scan_ang,
+                0.5 * rel_yr**2 * cos_scan_ang,
             ]
         )
 
@@ -510,14 +518,14 @@ class LeastSquares(ExoGaia):
         residuals = obs_pos - best_model
 
         res_ra, res_dec = (
-            np.sin(scan_ang) * residuals,
-            np.cos(scan_ang) * residuals,
+            sin_scan_ang * residuals,
+            cos_scan_ang * residuals,
         )
 
         if verbose:
             print("\nBest-fit parameters:")
-            print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
-            print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
+            print(f"   - RA offset = {best_param[0]:.3f} +/- {param_sig[0]:.3f} mas")
+            print(f"   - Dec offset = {best_param[1]:.3f} +/- {param_sig[1]:.3f} mas")
             print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
             print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
             print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
@@ -533,7 +541,7 @@ class LeastSquares(ExoGaia):
 
             star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
 
-            delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
+            delta_ra_obs, delta_dec_obs, _ = star_model.calc_2d_model(
                 model_param=best_param, obs_time=None
             )
 
@@ -541,7 +549,7 @@ class LeastSquares(ExoGaia):
                 self.time_start.tcb.jyear, self.time_end.tcb.jyear, 1000
             )
 
-            delta_ra_full, delta_dec_full, _ = star_model.calc_model(
+            delta_ra_full, delta_dec_full, _ = star_model.calc_2d_model(
                 model_param=best_param, obs_time=time_full
             )
 
@@ -549,12 +557,14 @@ class LeastSquares(ExoGaia):
 
             star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
 
-            delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_model(
+            delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_2d_model(
                 model_param=best_param[:5], obs_time=None
             )
 
             delta_ra_no_accel_full, delta_dec_no_accel_full, _ = (
-                star_no_accel.calc_model(model_param=best_param[:5], obs_time=time_full)
+                star_no_accel.calc_2d_model(
+                    model_param=best_param[:5], obs_time=time_full
+                )
             )
 
             # Acceleration
@@ -616,17 +626,19 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"RA = {best_param[0]:.3f} deg $\pm$ {param_sig[0]:.3f} mas" + "\n"
-                rf"Dec = {best_param[1]:.3f} deg $\pm$ {param_sig[1]:.3f} mas" + "\n"
+                rf"$\Delta$RA = {best_param[0]:.3f} mas $\pm$ {param_sig[0]:.3f} mas"
+                + "\n"
+                rf"$\Delta$Dec = {best_param[1]:.3f} mas $\pm$ {param_sig[1]:.3f} mas"
+                + "\n"
                 rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas" + "\n"
                 rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
                 rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
             )
 
-            axs[0].invert_xaxis()
             axs[0].set_xlabel(r"$\Delta\alpha$ (mas)")
             axs[0].set_ylabel(r"$\Delta\delta$ (mas)")
+            axs[0].invert_xaxis()
 
             axs[1].plot(
                 1e3 * delta_ra_accel,
@@ -653,22 +665,22 @@ class LeastSquares(ExoGaia):
                 x1 = (
                     delta_ra_obs[i]
                     - delta_ra_no_accel[i]
-                    + np.sin(scan_ang[i]) * (res_item + obs_err[i])
+                    + sin_scan_ang[i] * (res_item + obs_err[i])
                 )
                 x2 = (
                     delta_ra_obs[i]
                     - delta_ra_no_accel[i]
-                    + np.sin(scan_ang[i]) * (res_item - obs_err[i])
+                    + sin_scan_ang[i] * (res_item - obs_err[i])
                 )
                 y1 = (
                     delta_dec_obs[i]
                     - delta_dec_no_accel[i]
-                    + np.cos(scan_ang[i]) * (res_item + obs_err[i])
+                    + cos_scan_ang[i] * (res_item + obs_err[i])
                 )
                 y2 = (
                     delta_dec_obs[i]
                     - delta_dec_no_accel[i]
-                    + np.cos(scan_ang[i]) * (res_item - obs_err[i])
+                    + cos_scan_ang[i] * (res_item - obs_err[i])
                 )
 
                 axs[1].plot(
@@ -723,9 +735,9 @@ class LeastSquares(ExoGaia):
                 rf"$\pm$ {1e3*param_sig[6]:.3f} $\mu$as/yr$^2$"
             )
 
-            axs[1].invert_xaxis()
             axs[1].set_xlabel(r"$\Delta\alpha$ ($\mu$as)")
             axs[1].set_ylabel(r"$\Delta\delta$ ($\mu$as)")
+            axs[1].invert_xaxis()
 
             axs[2].errorbar(
                 obs_time[0],
@@ -827,21 +839,22 @@ class LeastSquares(ExoGaia):
         obs_pos = self.data_table["centroid_pos_al"].to_numpy()
         obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
         rel_yr = self.data_table["relative_time_year"].to_numpy()
-        scan_ang = self.data_table["scan_pos_angle"].to_numpy()
+        sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
+        cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
         par_fac = self.data_table["parallax_factor_al"].to_numpy()
 
         # Design matrix for least-squares fit
         design = np.column_stack(
             [
-                np.sin(scan_ang),
-                np.cos(scan_ang),
+                sin_scan_ang,
+                cos_scan_ang,
                 par_fac,
-                rel_yr * np.sin(scan_ang),
-                rel_yr * np.cos(scan_ang),
-                0.5 * rel_yr**2 * np.sin(scan_ang),
-                0.5 * rel_yr**2 * np.cos(scan_ang),
-                (1.0 / 6.0) * rel_yr**3 * np.sin(scan_ang),
-                (1.0 / 6.0) * rel_yr**3 * np.cos(scan_ang),
+                rel_yr * sin_scan_ang,
+                rel_yr * cos_scan_ang,
+                0.5 * rel_yr**2 * sin_scan_ang,
+                0.5 * rel_yr**2 * cos_scan_ang,
+                (1.0 / 6.0) * rel_yr**3 * sin_scan_ang,
+                (1.0 / 6.0) * rel_yr**3 * cos_scan_ang,
             ]
         )
 
@@ -854,14 +867,14 @@ class LeastSquares(ExoGaia):
         residuals = obs_pos - best_model
 
         res_ra, res_dec = (
-            np.sin(scan_ang) * residuals,
-            np.cos(scan_ang) * residuals,
+            sin_scan_ang * residuals,
+            cos_scan_ang * residuals,
         )
 
         if verbose:
             print("\nBest-fit parameters:")
-            print(f"   - RA = {best_param[0]:.3f} deg +/- {param_sig[0]:.3f} mas")
-            print(f"   - Dec = {best_param[1]:.3f} deg +/- {param_sig[1]:.3f} mas")
+            print(f"   - RA offset = {best_param[0]:.3f} +/- {param_sig[0]:.3f} mas")
+            print(f"   - Dec offset = {best_param[1]:.3f} +/- {param_sig[1]:.3f} mas")
             print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
             print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
             print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
@@ -883,7 +896,7 @@ class LeastSquares(ExoGaia):
 
             star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
 
-            delta_ra_obs, delta_dec_obs, _ = star_model.calc_model(
+            delta_ra_obs, delta_dec_obs, _ = star_model.calc_2d_model(
                 model_param=best_param, obs_time=None
             )
 
@@ -891,7 +904,7 @@ class LeastSquares(ExoGaia):
                 self.time_start.tcb.jyear, self.time_end.tcb.jyear, 1000
             )
 
-            delta_ra_full, delta_dec_full, _ = star_model.calc_model(
+            delta_ra_full, delta_dec_full, _ = star_model.calc_2d_model(
                 model_param=best_param, obs_time=time_full
             )
 
@@ -899,12 +912,14 @@ class LeastSquares(ExoGaia):
 
             star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
 
-            delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_model(
+            delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_2d_model(
                 model_param=best_param[:5], obs_time=None
             )
 
             delta_ra_no_accel_full, delta_dec_no_accel_full, _ = (
-                star_no_accel.calc_model(model_param=best_param[:5], obs_time=time_full)
+                star_no_accel.calc_2d_model(
+                    model_param=best_param[:5], obs_time=time_full
+                )
             )
 
             # Acceleration
@@ -965,17 +980,19 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"RA = {best_param[0]:.3f} deg $\pm$ {param_sig[0]:.3f} mas" + "\n"
-                rf"Dec = {best_param[1]:.3f} deg $\pm$ {param_sig[1]:.3f} mas" + "\n"
+                rf"$\Delta$RA = {best_param[0]:.3f} mas $\pm$ {param_sig[0]:.3f} mas"
+                + "\n"
+                rf"$\Delta$Dec = {best_param[1]:.3f} mas $\pm$ {param_sig[1]:.3f} mas"
+                + "\n"
                 rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas" + "\n"
                 rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
                 + "\n"
                 rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
             )
 
-            axs[0].invert_xaxis()
             axs[0].set_xlabel(r"$\Delta\alpha$ (mas)")
             axs[0].set_ylabel(r"$\Delta\delta$ (mas)")
+            axs[0].invert_xaxis()
 
             axs[1].plot(
                 1e3 * delta_ra_accel,
@@ -1002,22 +1019,22 @@ class LeastSquares(ExoGaia):
                 x1 = (
                     delta_ra_obs[i]
                     - delta_ra_no_accel[i]
-                    + np.sin(scan_ang[i]) * (res_item + obs_err[i])
+                    + sin_scan_ang[i] * (res_item + obs_err[i])
                 )
                 x2 = (
                     delta_ra_obs[i]
                     - delta_ra_no_accel[i]
-                    + np.sin(scan_ang[i]) * (res_item - obs_err[i])
+                    + sin_scan_ang[i] * (res_item - obs_err[i])
                 )
                 y1 = (
                     delta_dec_obs[i]
                     - delta_dec_no_accel[i]
-                    + np.cos(scan_ang[i]) * (res_item + obs_err[i])
+                    + cos_scan_ang[i] * (res_item + obs_err[i])
                 )
                 y2 = (
                     delta_dec_obs[i]
                     - delta_dec_no_accel[i]
-                    + np.cos(scan_ang[i]) * (res_item - obs_err[i])
+                    + cos_scan_ang[i] * (res_item - obs_err[i])
                 )
 
                 axs[1].plot(
@@ -1076,9 +1093,9 @@ class LeastSquares(ExoGaia):
                 rf"$\pm$ {1e3*param_sig[8]:.3f} $\mu$as/yr$^3$"
             )
 
-            axs[1].invert_xaxis()
             axs[1].set_xlabel(r"$\Delta\alpha$ ($\mu$as)")
             axs[1].set_ylabel(r"$\Delta\delta$ ($\mu$as)")
+            axs[1].invert_xaxis()
 
             axs[2].errorbar(
                 obs_time[0],
@@ -1180,11 +1197,12 @@ class LeastSquares(ExoGaia):
         obs_pos = self.data_table["centroid_pos_al"].to_numpy()
         # obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
         rel_yr = self.data_table["relative_time_year"].to_numpy()
-        scan_ang = self.data_table["scan_pos_angle"].to_numpy()
+        sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
+        cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
         par_fac = self.data_table["parallax_factor_al"].to_numpy()
 
         # Grid for the log10(P/days)
-        logp_list = np.linspace(np.log10(1e1), np.log10(1e4), n_points)
+        logp_list = np.linspace(np.log10(1e2), np.log10(1e5), n_points)
 
         # Grid for the eccentricity
         ecc_list = np.linspace(0.0, 1.0, n_points, endpoint=False)
@@ -1198,6 +1216,7 @@ class LeastSquares(ExoGaia):
 
         ruwe_grid = np.zeros((logp_list.size, ecc_list.size, tau_list.size))
         tau_grid = np.zeros((logp_list.size, ecc_list.size, tau_list.size))
+        # mass_grid = np.zeros((logp_list.size, ecc_list.size, tau_list.size))
 
         global_ruwe = np.inf
         # global_model = None
@@ -1217,18 +1236,22 @@ class LeastSquares(ExoGaia):
                     x_orb, y_orb = binary_model.solve_kepler(period, ecc_item, tau_item)
 
                     # Linear least-squares fit
+                    # See equation 9 in Holl et al. (2023)
+                    # delta RA = B x_orb + G y_orb
+                    # delta Dec = A x_orb + F y_orb
+                    # eta_orb = x_orb (A cos(psi) + B sin(psi)) + y_orb (F cos(psi) + G sin(psi))
 
                     design = np.column_stack(
                         [
-                            np.sin(scan_ang),
-                            np.cos(scan_ang),
-                            par_fac,
-                            rel_yr * np.sin(scan_ang),
-                            rel_yr * np.cos(scan_ang),
-                            x_orb * np.sin(scan_ang),  # Thiele-Innes B
-                            y_orb * np.sin(scan_ang),  # Thiele-Innes G
-                            x_orb * np.cos(scan_ang),  # Thiele-Innes A
-                            y_orb * np.cos(scan_ang),  # Thiele-Innes F
+                            sin_scan_ang,  # delta eta / delta RA
+                            cos_scan_ang,  # delta eta / delta Dec
+                            par_fac,  # delta eta / delta parallax
+                            rel_yr * sin_scan_ang,  # delta eta / delta mu_ra
+                            rel_yr * cos_scan_ang,  # delta eta / delta mu_dec
+                            x_orb * cos_scan_ang,  # delta eta / delta A
+                            x_orb * sin_scan_ang,  # delta eta / delta B
+                            y_orb * cos_scan_ang,  # delta eta / delta F
+                            y_orb * sin_scan_ang,  # delta eta / delta G
                         ]
                     )
 
@@ -1236,20 +1259,18 @@ class LeastSquares(ExoGaia):
                         design, obs_pos=obs_pos, verbose=False
                     )
 
-                    param_sig = np.sqrt(np.diag(param_cov))
-
                     if ruwe < global_ruwe:
                         global_ruwe = ruwe
                         # global_model = best_model
                         global_param = best_param
-                        global_sigma = param_sig
+                        global_cov = param_cov
                         global_orbit = [period, ecc_item, tau_item]
 
                     # x_sky = best_param[0] * x_orb + best_param[1] * y_orb
                     # y_sky = best_param[2] * x_orb + best_param[3] * y_orb
                     # plt.plot(x_sky, y_sky, 'o')
-                    # plt.plot(x_sky + (best_model-obs_pos)*np.sin(scan_ang),
-                    #          y_sky + (best_model-obs_pos)*np.cos(scan_ang), 'o')
+                    # plt.plot(x_sky + (best_model-obs_pos)*sin_scan_ang,
+                    #          y_sky + (best_model-obs_pos)*cos_scan_ang, 'o')
                     # plt.show()
 
                     # Store RUWE as goodness-of-fit statistics
@@ -1263,10 +1284,8 @@ class LeastSquares(ExoGaia):
         pbar.close()
 
         # fig, ax = plt.subplots(figsize=(7, 3))
-        #
         # cmap = cm.viridis
         # norm = Normalize(vmin=0.0, vmax=1.0)
-        #
         # ax.errorbar(
         #     obs_time,
         #     obs_pos-global_model,
@@ -1276,27 +1295,105 @@ class LeastSquares(ExoGaia):
         #     color="black",
         #     ms=1.0,
         # )
-        #
         # sm = cm.ScalarMappable(norm=norm, cmap=cmap)
         # plt.colorbar(sm, ax=ax)
         # plt.savefig("test.png")
         # plt.close()
 
+        # Uncorrelated uncertainties
+        global_sigma = np.sqrt(np.diag(global_cov))
+
+        # Convert Thiele-Innes constants into
+        # semi-major axis of the photocenter, a0
+        # See equation A.2 in Halbwachs et al. (2023)
+
+        # u = (A^2 + B^2 + F^2 + G^2) / 2
+        # v = AG - BF
+        # a = sqrt(u + sqrt((u+v)(u-v)))
+
+        u_param = (
+            global_param[5] ** 2
+            + global_param[6] ** 2
+            + global_param[7] ** 2
+            + global_param[8] ** 2
+        ) / 2.0
+
+        v_param = global_param[5] * global_param[8] - global_param[6] * global_param[7]
+
+        # All components in the 1D position of eta are in mas
+        # Therefore, also the Thiele-Innes components
+
+        sma_0 = np.sqrt(u_param + np.sqrt((u_param + v_param) * (u_param - v_param)))
+
+        # Propagate uncertainties from Thiele-Innes constants to sma_0
+        # Gradient of sma_0 to u and v
+
+        w_param = np.sqrt(u_param**2 - v_param**2)
+        da_du = np.sqrt(w_param + u_param) / (2.0 * w_param)
+        da_dv = -v_param / (2.0 * w_param * np.sqrt(w_param + u_param))
+
+        du_dA = global_param[5]  # A
+        du_dB = global_param[6]  # B
+        du_dF = global_param[7]  # F
+        du_dG = global_param[8]  # G
+
+        dv_dA = global_param[8]  # G
+        dv_dB = -global_param[7]  # -F
+        dv_dF = -global_param[6]  # -B
+        dv_dG = global_param[5]  # A
+
+        grad_a = np.array(
+            [
+                da_du * du_dA + da_dv * dv_dA,
+                da_du * du_dB + da_dv * dv_dB,
+                da_du * du_dF + da_dv * dv_dF,
+                da_du * du_dG + da_dv * dv_dG,
+            ]
+        )
+
+        # global_cov[5:, 5:] are covariances of the
+        # Thiele-Innes constants in the order A, B, F, G
+        # TODO Double check if the calculation is correct
+        # The uncertainty on sma_0 seems a bit small?
+
+        sma_0_sigma = np.sqrt(grad_a @ global_cov[5:, 5:] @ grad_a)
+
+        # Calculate mass function
+        # See equation 1 in Halbwachs et al. (2023)
+
+        f_mass = (sma_0 / global_param[2]) ** 3 / (global_orbit[0] / 365.25) ** 2
+
+        # Companion mass M2
+        # See equation 2 in Gaia colab (2025) on Gaia BH3
+        # f_mass = M2 (M2/(M1+M2))**2
+
+        def find_root(mass_2):
+            return mass_2**3 / (self.primary_mass[0] + mass_2) ** 2 - f_mass
+
+        mass_2 = brentq(find_root, 0.0, 100.0 * self.primary_mass[0])
+
         print(f"Best-fit parameters (RUWE = {global_ruwe:.3f}):")
-        print(f"   - RA = {global_param[0]:.3f} deg +/- {global_sigma[0]:.3f} mas")
-        print(f"   - Dec = {global_param[1]:.3f} deg +/- {global_sigma[1]:.3f} mas")
+        print(f"   - RA offset = {global_param[0]:.3f} +/- {global_sigma[0]:.3f} mas")
+        print(f"   - Dec offset = {global_param[1]:.3f} +/- {global_sigma[1]:.3f} mas")
         print(f"   - Parallax = {global_param[2]:.3f} +/- {global_sigma[2]:.3f} mas")
         print(f"   - mu in RA = {global_param[3]:.3f} +/- {global_sigma[3]:.3f} mas/yr")
         print(
             f"   - mu in Dec = {global_param[4]:.3f} +/- {global_sigma[4]:.3f} mas/yr"
         )
-        print(f"   - Thiele-Innes B = {global_param[5]:.3f} +/- {global_sigma[5]:.3f}")
-        print(f"   - Thiele-Innes G = {global_param[6]:.3f} +/- {global_sigma[6]:.3f}")
-        print(f"   - Thiele-Innes A = {global_param[7]:.3f} +/- {global_sigma[7]:.3f}")
-        print(f"   - Thiele-Innes F = {global_param[8]:.3f} +/- {global_sigma[8]:.3f}")
+        print(f"   - Thiele-Innes A = {global_param[5]:.3f} +/- {global_sigma[5]:.3f}")
+        print(f"   - Thiele-Innes B = {global_param[6]:.3f} +/- {global_sigma[6]:.3f}")
+        print(f"   - Thiele-Innes F = {global_param[7]:.3f} +/- {global_sigma[7]:.3f}")
+        print(f"   - Thiele-Innes G = {global_param[8]:.3f} +/- {global_sigma[8]:.3f}")
         print(f"   - Period = {global_orbit[0]:.3f} days")
         print(f"   - Eccentricity = {global_orbit[1]:.3f}")
         print(f"   - Relative time of periastron = {global_orbit[2]:.2f}")
+
+        print("\nDerived parameters:")
+        print(
+            f"   - Semi-major axis of photocenter = {sma_0:.3f} +/- {sma_0_sigma:.3f} mas"
+        )
+        print(f"   - Mass function = {f_mass:.3f} Msun")
+        print(f"   - Secondary mass (Msun) = {mass_2:.3f} Msun")
 
         # Select minimum RUWE along the 3rd axis to create a 2D array
 

@@ -85,9 +85,15 @@ class FitResults(ExoGaia):
             self.ln_like = self.ln_like.reshape(-1)
             print(f"\nReshaped samples: {self.samples.shape}")
 
+        if self.samples.shape[0] == 0:
+            raise ValueError(
+                "The posterior array contains zero samples. "
+                f"Perhaps the burnin of {burnin} is too large?"
+            )
+
         self.labels = [
-            r"$\alpha \cos\delta$ (mas)",
-            r"$\delta$ (mas)",
+            r"$\Delta \alpha \cos\delta$ (mas)",
+            r"$\Delta \delta$ (mas)",
             r"$\mu_\alpha \cos\delta$ (mas/yr)",
             r"$\mu_\delta$ (mas/yr)",
             r"$\varpi$ (mas)",
@@ -186,7 +192,9 @@ class FitResults(ExoGaia):
 
     @beartype
     def plot_posterior(
-        self, truths: typing.List[float] = None, plot_file: typing.Optional[str] = None
+        self,
+        truths: typing.Optional[typing.List[float]] = None,
+        plot_file: typing.Optional[str] = None,
     ) -> Figure:
         """
         Function for plotting the posterior distributions.
@@ -215,17 +223,20 @@ class FitResults(ExoGaia):
 
         # Convert sma to log10(sma)
         post_samples[:, 5] = np.log10(post_samples[:, 5])
-        truths[5] = np.log10(truths[5])
+        if truths is not None:
+            truths[5] = np.log10(truths[5])
 
         # Convert mass_2 to log10(mass_2)
         post_samples[:, 12] = np.log10(post_samples[:, 12])
-        truths[12] = np.log10(truths[12])
+        if truths is not None:
+            truths[12] = np.log10(truths[12])
 
         # Convert inc, aop, pan from rad to deg
         post_samples[:, 7:10] = np.degrees(post_samples[:, 7:10])
-        truths[7] = np.degrees(truths[7])
-        truths[8] = np.degrees(truths[8])
-        truths[9] = np.degrees(truths[9])
+        if truths is not None:
+            truths[7] = np.degrees(truths[7])
+            truths[8] = np.degrees(truths[8])
+            truths[9] = np.degrees(truths[9])
 
         # Quantiles for the 1D distributions (-1, 1 sigma)
         quantiles = [norm.cdf(n_sigma) for n_sigma in [-1, 1]]
@@ -241,8 +252,8 @@ class FitResults(ExoGaia):
         range_select = np.full(self.n_params, 0.99)
 
         params = [
-            r"$\alpha \cos\delta$",
-            r"$\delta$",
+            r"$\Delta \alpha \cos\delta$",
+            r"$\Delta \delta$",
             r"$\varpi$",
             r"$\mu_\alpha \cos\delta$",
             r"$\mu_\delta$",
@@ -259,8 +270,8 @@ class FitResults(ExoGaia):
         ]
 
         units = [
-            "(deg)",
-            "(deg)",
+            "(mas)",
+            "(mas)",
             "(mas)",
             "(mas/yr)",
             "(mas/yr)",
@@ -345,9 +356,9 @@ class FitResults(ExoGaia):
         self.print_section("Plot residuals")
 
         # Epoch astrometry data
-        obs_yr = self.data_table["relative_time_year"]
-        obs_pos = self.data_table["centroid_pos_al"]
-        obs_err = self.data_table["centroid_pos_error_al"]
+        obs_yr = self.data_table["relative_time_year"].to_numpy()
+        obs_pos = self.data_table["centroid_pos_al"].to_numpy()
+        obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
 
         # Best sample
         max_idx = np.argmax(self.ln_like)
@@ -402,8 +413,9 @@ class FitResults(ExoGaia):
         """
 
         # Epoch astrometry data
-        obs_err = self.data_table["centroid_pos_error_al"]
-        scan_ang = self.data_table["scan_pos_angle"]
+        obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
+        sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
+        cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
 
         # Best sample
         max_idx = np.argmax(self.ln_like)
@@ -448,10 +460,10 @@ class FitResults(ExoGaia):
                 color = "tab:purple"
                 zorder = 2
 
-            x1 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item + obs_err[i])
-            x2 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item - obs_err[i])
-            y1 = delta_dec[i] + np.cos(scan_ang[i]) * (res_item + obs_err[i])
-            y2 = delta_dec[i] + np.cos(scan_ang[i]) * (res_item - obs_err[i])
+            x1 = delta_ra[i] + sin_scan_ang[i] * (res_item + obs_err[i])
+            x2 = delta_ra[i] + sin_scan_ang[i] * (res_item - obs_err[i])
+            y1 = delta_dec[i] + cos_scan_ang[i] * (res_item + obs_err[i])
+            y2 = delta_dec[i] + cos_scan_ang[i] * (res_item - obs_err[i])
 
             plt.plot(
                 [1e3 * x1, 1e3 * x2],
@@ -463,8 +475,8 @@ class FitResults(ExoGaia):
             )
 
             plt.plot(
-                1e3 * delta_ra[i] + 1e3 * np.sin(scan_ang[i]) * res_item,
-                1e3 * delta_dec[i] + 1e3 * np.cos(scan_ang[i]) * res_item,
+                1e3 * delta_ra[i] + 1e3 * sin_scan_ang[i] * res_item,
+                1e3 * delta_dec[i] + 1e3 * cos_scan_ang[i] * res_item,
                 ls="none",
                 marker="s",
                 ms=5.0,

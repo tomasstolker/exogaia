@@ -10,6 +10,6 @@ Documentation for *exogaia*
    :hidden:
 
    installation
-   tutorial.ipynb
+   tutorials
    modules
    about

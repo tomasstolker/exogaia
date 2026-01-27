@@ -37,6 +37,8 @@ class StarModel(ExoGaia):
 
         self.data_table = epoch_astrometry.data_table
         self.ref_epoch = epoch_astrometry.ref_epoch
+        self.ra = epoch_astrometry.ra
+        self.dec = epoch_astrometry.dec
 
     @beartype
     def barycentric_position(self, obs_time: np.ndarray) -> CartesianRepresentation:
@@ -68,20 +70,26 @@ class StarModel(ExoGaia):
         return bar_pos + bar_pos * (mu / 3) ** (1 / 3)
 
     @beartype
-    def calc_model(
+    def calc_2d_model(
         self,
         model_param: typing.Union[typing.List[float], np.ndarray],
         obs_time: typing.Optional[np.ndarray] = None,
     ) -> typing.Tuple[np.ndarray, np.ndarray, typing.Optional[np.ndarray]]:
         """
-        Method for calculating the stellar track.
+        Method for calculating the stellar track, returning separately
+        the RA and Dec components. This function calculates the motion
+        due to parallax, which might be less precise than using the
+        parallax factors provided by Gaia, but these are not provided
+        for RA and Dec separately. Typically these are not needed,
+        but for creating a 2D plot of the stellar track, we need
+        to calculate the effect in RA and Dec separately.
 
         Parameters
         ----------
         model_param : list(float), np.ndarray
-            List or array with the model parameters, in the following order:
-            RA (deg), Dec (deg), parallax (mas), RA proper motion (mas/yr),
-            Dec proper motion (mas/yr).
+            List or array with the model parameters, in the following
+            order: RA offset (mas), Dec offset (mas), parallax (mas),
+            RA proper motion (mas/yr), Dec proper motion (mas/yr).
         obs_time : np.ndarray, None
             Array with the observing epochs in Julian years on the TCB
             scale. The epochs are selected from the ``EpochAstrometry``
@@ -98,18 +106,27 @@ class StarModel(ExoGaia):
         np.ndarray
             Array with the 1D projected positions (mas). Will only
             be returned if the size of ``obs_time`` is equal to the
-            size of ``self.data_table["scan_pos_angle"]``.
+            size of ``self.data_table["sin_scan_ang"]`` and
+            ``self.data_table["cos_scan_ang"]``.
         """
 
         if obs_time is None:
             obs_time = self.data_table["obs_time_tcb"].to_numpy()
+            sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
+            cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
 
-        scan_ang = self.data_table["scan_pos_angle"].to_numpy()
+        else:
+            sin_scan_ang = None
+            cos_scan_ang = None
+
+        rel_year = obs_time - self.ref_epoch.tcb.jyear
 
         n_param = len(model_param)
 
-        ra_coord = model_param[0]
-        dec_coord = model_param[1]
+        # Model parameters
+
+        ra_offset = model_param[0]
+        dec_offset = model_param[1]
         parallax = model_param[2]
         pm_ra = model_param[3]
         pm_dec = model_param[4]
@@ -117,6 +134,7 @@ class StarModel(ExoGaia):
         if len(model_param) > 5:
             pmdot_ra = model_param[5]
             pmdot_dec = model_param[6]
+
         else:
             pmdot_ra = None
             pmdot_dec = None
@@ -129,8 +147,20 @@ class StarModel(ExoGaia):
             pmdotdot_ra = None
             pmdotdot_dec = None
 
+        # RA and Dec coordinates
+
+        ra_coord = self.ra + ra_offset
+        dec_coord = self.dec + ra_offset
+
+        # Position of Gaia relative to the Solar System
+        # barycenter at each observation time
+
         gaia_pos = self.barycentric_position(obs_time)
         gaia_pos = gaia_pos.xyz.to_value()
+
+        # Tangent plane unit vectors on the sky
+        # Local directions of increasing RA and Dec
+        # at the source position, projected onto the sky
 
         alpha_hat = np.array(
             [-np.sin(np.radians(ra_coord)), np.cos(np.radians(ra_coord)), 0.0]
@@ -144,11 +174,13 @@ class StarModel(ExoGaia):
             ]
         )
 
+        # Design matrix for RA and Dec offsets
+
         design_ra = np.column_stack(
             [
                 np.full(obs_time.size, 1.0),
                 -(alpha_hat @ gaia_pos),
-                obs_time - self.ref_epoch.tcb.jyear,
+                rel_year,
             ]
         )
 
@@ -156,37 +188,115 @@ class StarModel(ExoGaia):
             [
                 np.full(obs_time.size, 1.0),
                 -(delta_hat @ gaia_pos),
-                obs_time - self.ref_epoch.tcb.jyear,
+                rel_year,
             ]
         )
 
-        params_ra = [ra_coord, parallax, pm_ra]
-        params_dec = [dec_coord, parallax, pm_dec]
+        # RA and Dec parameter vectors
+
+        params_ra = [ra_offset, parallax, pm_ra]
+        params_dec = [dec_offset, parallax, pm_dec]
+
+        # RA and Dec offsets
 
         delta_ra = design_ra @ params_ra
         delta_dec = design_dec @ params_dec
 
-        if n_param in [7, 9]:
-            delta_ra += 0.5 * (obs_time - self.ref_epoch.tcb.jyear) ** 2 * pmdot_ra
+        # Add accelerations components
 
-            delta_dec += 0.5 * (obs_time - self.ref_epoch.tcb.jyear) ** 2 * pmdot_dec
+        if n_param in [7, 9]:
+            delta_ra += 0.5 * rel_year**2 * pmdot_ra
+            delta_dec += 0.5 * rel_year**2 * pmdot_dec
 
         if n_param == 9:
-            delta_ra += (
-                (1.0 / 6.0) * (obs_time - self.ref_epoch.tcb.jyear) ** 3 * pmdotdot_ra
-            )
-
-            delta_dec += (
-                (1.0 / 6.0) * (obs_time - self.ref_epoch.tcb.jyear) ** 3 * pmdotdot_dec
-            )
+            delta_ra += (1.0 / 6.0) * rel_year**3 * pmdotdot_ra
+            delta_dec += (1.0 / 6.0) * rel_year**3 * pmdotdot_dec
 
         # Calculate 1D projected positions
-        if scan_ang.size == delta_ra.size and scan_ang.size == delta_dec.size:
-            delta_pos = delta_ra * np.sin(scan_ang) + delta_dec * np.cos(scan_ang)
+
+        if sin_scan_ang is not None and cos_scan_ang is not None:
+            delta_pos = delta_ra * sin_scan_ang + delta_dec * cos_scan_ang
         else:
             delta_pos = None
 
-        return delta_ra - ra_coord, delta_dec - dec_coord, delta_pos
+        return delta_ra, delta_dec, delta_pos
+
+    @beartype
+    def calc_1d_model(
+        self,
+        model_param: typing.Union[typing.List[float], np.ndarray],
+        calc_parallax: bool = False,
+    ) -> np.ndarray:
+        """
+        Method for calculating the 1D stellar track, including the
+        effect from proper motion and parallax. The function
+        will use the observation epochs and scan angles that are
+        stored in the ``data_table`` of ``epoch_astrometry``,
+        so it can't be used for calculating epoch astrometry
+        of arbitrary observation epochs. For that purpose,
+        the :class:`~exogaia.models.StarModel.calc_2d_model`
+        method should be used.
+
+        Parameters
+        ----------
+        model_param : list(float), np.ndarray
+            List or array with the model parameters, in the following
+            order: RA offset (mas), Dec offset (mas), parallax (mas),
+            RA proper motion (mas/yr), Dec proper motion (mas/yr).
+        calc_parallax : bool
+            Calculate the parallax effect or adopt the parallax
+            factors from Gaia (default: False). The latter will
+            be slightly more accurate. This parameter was mainly
+            included for testing purposes.
+
+        Returns
+        -------
+        np.ndarray
+            Array with the 1D projected positions (mas).
+        """
+
+        rel_year = self.data_table["relative_time_year"].to_numpy()
+        sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
+        cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
+        par_fac = self.data_table["parallax_factor_al"].to_numpy()
+
+        n_param = len(model_param)
+
+        # Model parameters
+
+        if calc_parallax:
+            # This function calculates the effect from the parallax,
+            # presumably in a more simplistic approach than the
+            # 1D parallax factor provided with the Gaia epoch
+            # astrometry.
+            _, _, delta_pos = self.calc_2d_model(model_param, obs_time=None)
+
+        else:
+            # Design matrix for 5-param linear projection
+
+            design = np.column_stack(
+                [
+                    sin_scan_ang,
+                    cos_scan_ang,
+                    par_fac,
+                    rel_year * sin_scan_ang,
+                    rel_year * cos_scan_ang,
+                ]
+            )
+
+            delta_pos = design @ model_param[0:5]
+
+            # Add accelerations components
+
+            if n_param in [7, 9]:
+                delta_pos += 0.5 * rel_year**2 * model_param[5]
+                delta_pos += 0.5 * rel_year**2 * model_param[6]
+
+            if n_param == 9:
+                delta_pos += (1.0 / 6.0) * rel_year**3 * model_param[7]
+                delta_pos += (1.0 / 6.0) * rel_year**3 * model_param[8]
+
+        return delta_pos
 
 
 class BinaryModel(ExoGaia):
@@ -211,6 +321,7 @@ class BinaryModel(ExoGaia):
             None
         """
 
+        self.epoch_astrometry = epoch_astrometry
         self.data_table = epoch_astrometry.data_table
         self.verbose = verbose
 
@@ -264,7 +375,7 @@ class BinaryModel(ExoGaia):
         # Solve Kepler's equation
         ecc_anom, _, _ = kepler.kepler(mean_anom_obs, ecc)
 
-        # (x, y) position in the orbital plane
+        # (x, y) position in the orbital plane (au)
         x_orb = np.cos(ecc_anom) - ecc
         y_orb = np.sqrt(1.0 - ecc**2) * np.sin(ecc_anom)
 
@@ -291,13 +402,13 @@ class BinaryModel(ExoGaia):
         Returns
         -------
         float
-            Thiele-Innes A constant.
+            Thiele-Innes A constant (au).
         float
-            Thiele-Innes B constant.
+            Thiele-Innes B constant (au).
         float
-            Thiele-Innes F constant.
+            Thiele-Innes F constant (au).
         float
-            Thiele-Innes G constant.
+            Thiele-Innes G constant (au).
         """
 
         thiele_innes_a = sma * (
@@ -331,12 +442,12 @@ class BinaryModel(ExoGaia):
         ----------
         model_param : list(float), np.ndarray
             List or array with the model parameters, in the following
-            order:  RA (deg), Dec (deg), parallax (mas), RA proper
-            motion (mas/yr), Dec proper motion (mas/yr), semi-major
-            axis (au), eccentricity, inclination (rad), argument of
-            periastron (rad), position angle of ascending node (rad),
-            relative time of periastron, primary mass (Msun),
-            secondary mass (Msun).
+            order:  RA offset (mas), Dec offset (mas), parallax (mas),
+            RA proper motion (mas/yr), Dec proper motion (mas/yr),
+            semi-major axis (au), eccentricity, inclination (rad),
+            argument of periastron (rad), position angle of ascending
+            node (rad), relative time of periastron, primary mass
+            (Msun), secondary mass (Msun).
         rel_time_day : np.ndarray, None
             Array with the observing times in Julian days relative
             to the ``ref_epoch``. The observing times are selected
@@ -376,6 +487,7 @@ class BinaryModel(ExoGaia):
         )
 
         # Rotate (x_orb, y_orb) into sky plane (x_sky, y_sky)
+        # See equation 9 in Holl et al. (2023)
         x_sky = thiele_innes_b * x_orb + thiele_innes_g * y_orb
         y_sky = thiele_innes_a * x_orb + thiele_innes_f * y_orb
 
@@ -397,12 +509,12 @@ class BinaryModel(ExoGaia):
         ----------
         model_param : list(float), np.ndarray
             List or array with the model parameters, in the following
-            order:  RA (deg), Dec (deg), parallax (mas), RA proper
-            motion (mas/yr), Dec proper motion (mas/yr), semi-major
-            axis (au), eccentricity, inclination (rad), argument of
-            periastron (rad), position angle of ascending node (rad),
-            relative time of periastron, primary mass (Msun),
-            secondary mass (Msun).
+            order:  RA offset (mas), Dec offset (mas), parallax (mas),
+            RA proper motion (mas/yr), Dec proper motion (mas/yr),
+            semi-major axis (au), eccentricity, inclination (rad),
+            argument of periastron (rad), position angle of ascending
+            node (rad), relative time of periastron, primary mass
+            (Msun), secondary mass (Msun).
 
         Returns
         -------
@@ -412,8 +524,9 @@ class BinaryModel(ExoGaia):
         """
 
         # Epoch astrometry data
-        rel_yr = self.data_table["relative_time_year"].to_numpy()
-        scan_ang = self.data_table["scan_pos_angle"].to_numpy()
+        rel_year = self.data_table["relative_time_year"].to_numpy()
+        sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
+        cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
         par_fac = self.data_table["parallax_factor_al"].to_numpy()
 
         # Orbital period (days)
@@ -446,23 +559,30 @@ class BinaryModel(ExoGaia):
             print(f"   - Period (days) = {period:.2f}")
 
         # Design matrix for 5-param linear projection
+
         design = np.column_stack(
             [
-                np.sin(scan_ang),
-                np.cos(scan_ang),
+                sin_scan_ang,
+                cos_scan_ang,
                 par_fac,
-                rel_yr * np.sin(scan_ang),
-                rel_yr * np.cos(scan_ang),
+                rel_year * sin_scan_ang,
+                rel_year * cos_scan_ang,
             ]
         )
 
-        star_param = model_param[0:5]
-        star_model = design @ star_param
+        # 1D stellar track from linear projection on design matrix
+
+        star_model = design @ model_param[0:5]
+
+        # star_comp = StarModel(self.epoch_astrometry)
+        # star_test = star_comp.calc_1d_model(model_param, calc_parallax=True)
+        # plt.plot(rel_year, star_model-star_test, "o")
+        # plt.show()
 
         delta_ra, delta_dec = self.calc_orbit(model_param)
 
         # Calculate 1D projected positions of orbit model
-        orbit_model = delta_ra * np.sin(scan_ang) + delta_dec * np.cos(scan_ang)
+        orbit_model = delta_ra * sin_scan_ang + delta_dec * cos_scan_ang
 
         return star_model + orbit_model
 
@@ -517,7 +637,10 @@ class BinaryModel(ExoGaia):
         chi2_red = np.sum(residuals**2 / obs_err**2) / n_dof
 
         # RUWE
-        ruwe = np.sqrt(chi2_red)
+        if self.epoch_astrometry.sim_data:
+            ruwe = np.sqrt(chi2_red)
+        else:
+            ruwe = np.sqrt(chi2_red) / self.epoch_astrometry.u0_norm
 
         if self.verbose:
             print(f"Reduced chi^2 = {chi2_red:.2f}")
@@ -557,7 +680,8 @@ class BinaryModel(ExoGaia):
 
         # Epoch astrometry data
         obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
-        scan_ang = self.data_table["scan_pos_angle"].to_numpy()
+        sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
+        cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
 
         mtot = model_param[11] + model_param[12]
         period = np.sqrt(model_param[5] ** 3 / mtot) * 365.25
@@ -573,8 +697,8 @@ class BinaryModel(ExoGaia):
             self.print_section("Plot orbit")
 
         res_ra, res_dec = (
-            np.sin(scan_ang) * residuals,
-            np.cos(scan_ang) * residuals,
+            sin_scan_ang * residuals,
+            cos_scan_ang * residuals,
         )
 
         fig = plt.figure(figsize=(4, 4))
@@ -591,10 +715,10 @@ class BinaryModel(ExoGaia):
         )
 
         for i, res_item in enumerate(residuals):
-            x1 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item + obs_err)
-            x2 = delta_ra[i] + np.sin(scan_ang[i]) * (res_item - obs_err)
-            y1 = delta_dec[i] + np.cos(scan_ang[i]) * (res_item + obs_err)
-            y2 = delta_dec[i] + np.cos(scan_ang[i]) * (res_item - obs_err)
+            x1 = delta_ra[i] + sin_scan_ang[i] * (res_item + obs_err)
+            x2 = delta_ra[i] + sin_scan_ang[i] * (res_item - obs_err)
+            y1 = delta_dec[i] + cos_scan_ang[i] * (res_item + obs_err)
+            y2 = delta_dec[i] + cos_scan_ang[i] * (res_item - obs_err)
             plt.plot([x1, x2], [y1, y2], "-", lw=1, color="black")
 
         plt.plot(

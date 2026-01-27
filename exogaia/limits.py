@@ -63,7 +63,7 @@ class CompletenessMap(ExoGaia):
     @beartype
     def calc_completeness(
         self,
-        n_sigma: float = 5.0,
+        n_sigma: typing.Union[float, int] = 5,
         n_samples: int = 30,
         mass_points: typing.Optional[np.ndarray] = None,
         sma_points: typing.Optional[np.ndarray] = None,

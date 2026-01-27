@@ -17,6 +17,7 @@ from astropy.table import Table
 from astropy.time import Time
 from astroquery.gaia import Gaia
 from beartype import beartype, typing
+from scipy.interpolate import RegularGridInterpolator
 
 from exogaia.core import ExoGaia
 from exogaia.models import BinaryModel, StarModel
@@ -66,6 +67,8 @@ class EpochAstrometry(ExoGaia):
         self.pmra = None
         self.pmdec = None
         self.phot_g_mean_mag = None
+        self.u0_norm = None
+        self.sim_data = False
 
         # Start of the Gaia mission
         self.time_start = Time("2014-07-25 10:30:00", scale="utc")
@@ -203,11 +206,13 @@ class EpochAstrometry(ExoGaia):
         csv_out : str
             Output CSV file to store the simulated epoch astrometry.
         ra : float, None
-            RA coordinate (deg) at the reference epoch of
-            the ``gaia_release``.
+            RA coordinate (deg) at the reference epoch of the
+            ``gaia_release``, relative to the RA at the
+            reference epoch.
         dec : float, None
-            Dec coordinate (deg) at the reference epoch of
-            the ``gaia_release``.
+            Dec coordinate (deg) at the reference epoch of the
+            ``gaia_release``, relative to the Dec at the
+            reference epoch.
         parallax : float
             Parallax (mas).
         pmra : float, None
@@ -246,6 +251,10 @@ class EpochAstrometry(ExoGaia):
 
         if verbose:
             self.print_section("Simulate data")
+
+        # For simulated data, UWE = RUWE when fitting models
+
+        self.sim_data = True
 
         # Adopt stellar parameters from class attributes
 
@@ -414,6 +423,7 @@ class EpochAstrometry(ExoGaia):
 
         nside = 64
 
+        # theta and phi are in degrees when lonlat=True
         pix_num = healpy.ang2pix(nside=nside, theta=self.ra, phi=self.dec, lonlat=True)
 
         with h5py.File(healpix_file, "r") as hdf5_file:
@@ -493,7 +503,9 @@ class EpochAstrometry(ExoGaia):
             "obs_time_tcb": t_ast_yr + self.ref_epoch.tcb.jyear,
             "relative_time_year": t_ast_yr,
             "relative_time_day": t_ast_day,
-            "scan_pos_angle": psi,
+            "scan_pos_angle": np.degrees(psi),
+            "sin_scan_ang": np.sin(psi),
+            "cos_scan_ang": np.cos(psi),
             "parallax_factor_al": plx_factor,
         }
 
@@ -507,6 +519,12 @@ class EpochAstrometry(ExoGaia):
             print(f"   - Proper motion in RA (mas/yr) = {self.pmra:.2f}")
             print(f"   - Proper motion in Dec (mas/yr) = {self.pmdec:.2f}")
             print(f"   - G-band magnitude = {self.phot_g_mean_mag:.2f}")
+
+        # Setting the RA/Dec offsets, which are relative to the
+        # RA/Dec coordinates at the gaia_release epoch, to zero
+
+        ra_offset = 0.0  # (mas)
+        dec_offset = 0.0  # (mas)
 
         if binary:
             # Orbital period (days)
@@ -526,8 +544,8 @@ class EpochAstrometry(ExoGaia):
                 print(f"   - Period (days) = {period:.2f}")
 
             model_param = [
-                self.ra,
-                self.dec,
+                ra_offset,
+                dec_offset,
                 self.parallax,
                 self.pmra,
                 self.pmdec,
@@ -547,15 +565,15 @@ class EpochAstrometry(ExoGaia):
 
         else:
             model_param = [
-                self.ra,
-                self.dec,
+                ra_offset,
+                dec_offset,
                 self.parallax,
                 self.pmra,
                 self.pmdec,
             ]
 
             star_model = StarModel(epoch_astrometry=self)
-            _, _, cen_pos = star_model.calc_model(model_param=model_param)
+            cen_pos = star_model.calc_1d_model(model_param=model_param)
 
         rng = np.random.default_rng()
         cen_pos += rng.normal(loc=0.0, scale=sigma_per_transit, size=len(psi))
@@ -690,7 +708,8 @@ class EpochAstrometry(ExoGaia):
         SELECT ra, ra_error, dec, dec_error, parallax, parallax_error,
                pmra, pmra_error, pmdec, pmdec_error, phot_g_mean_mag,
                astrometric_chi2_al, astrometric_n_good_obs_al, ruwe,
-               astrometric_excess_noise, non_single_star
+               astrometric_excess_noise, non_single_star,
+               nu_eff_used_in_astrometry
         FROM gaia{gaia_release.lower()}.gaia_source
         WHERE source_id = {source_id}
         """
@@ -711,12 +730,17 @@ class EpochAstrometry(ExoGaia):
         pmdec_error = float(gaia_result["pmdec_error"])
         phot_g_mean_mag = float(gaia_result["phot_g_mean_mag"])
 
+        # Effective wavenumber (i.e. pseudocolor) of the source
+        # used in the astrometric solution (um-1)
+        nu_eff = float(gaia_result["nu_eff_used_in_astrometry"])
+
         print(f"\nRA = {ra:.3f} deg +/- {ra_error:.3f} mas")
         print(f"Dec = {dec:.3f} deg +/- {dec_error:.3f} mas")
         print(f"Parallax = {parallax:.3f} +/- {parallax_error:.3f} mas")
         print(f"Proper motion in RA = {pmra:.3f} +/- {pmra_error:.3f} mas/yr")
         print(f"Proper motion in Dec = {pmdec:.3f} +/- {pmdec_error:.3f} mas/yr")
         print(f"G-band magnitude = {phot_g_mean_mag:.3f}")
+        print(f"Pseudocolor = {nu_eff:.2f} um-1")
 
         self.ra = ra
         self.dec = dec
@@ -725,16 +749,52 @@ class EpochAstrometry(ExoGaia):
         self.pmdec = pmdec
         self.phot_g_mean_mag = phot_g_mean_mag
 
+        # Gaia (E)DR3: Re-normalised Unit Weight Error (RUWE)
+        # tables of u0(g,c) by L. Lindegren (2023 Sep 13)
+        # https://www.cosmos.esa.int/web/gaia/dr3-auxiliary-data
+
+        file_folder = Path(__file__).resolve().parent.parent
+        data_file = file_folder / "data/table_u0_g_c_p5.txt"
+
+        norm_g_mag, norm_nu_eff, norm_u0 = np.loadtxt(
+            data_file, skiprows=1, delimiter=",", unpack=True
+        )
+
+        g_vals = np.unique(norm_g_mag)
+        c_vals = np.unique(norm_nu_eff)
+
+        u0_grid = np.reshape(norm_u0, (g_vals.size, c_vals.size))
+
+        # Should look the same as plot_u0_g_c_p5.pdf
+        # plt.pcolormesh(g_vals, c_vals, u0_grid.T, cmap='rainbow')
+        # plt.colorbar()
+        # plt.show()
+
+        u0_interp = RegularGridInterpolator(
+            (g_vals, c_vals), u0_grid, method="linear", bounds_error=True
+        )
+
+        self.u0_norm = u0_interp((self.phot_g_mean_mag, nu_eff))
+
+        n_param = 5
+
         uwe = np.sqrt(
             gaia_result["astrometric_chi2_al"]
-            / (gaia_result["astrometric_n_good_obs_al"] - 5.0)
+            / (gaia_result["astrometric_n_good_obs_al"] - n_param)
         )
 
         print(f"\nUWE = {uwe:.2f}")
 
         if "ruwe" in gaia_result.columns:
             if not np.ma.is_masked(gaia_result["ruwe"]):
-                print(f"RUWE = {gaia_result['ruwe']:.2f}")
+                ruwe = gaia_result["ruwe"]
+                print(f"RUWE = {ruwe:.2f}")
+
+                if not np.isclose(self.u0_norm, uwe / ruwe, rtol=1e-2, atol=0.0):
+                    warnings.warn(
+                        f"The renormalization value is {self.u0_norm:.6f} "
+                        f"whereas the ratio of uwe/ruwe is {uwe/ruwe:.6f}."
+                    )
 
         if "astrometric_excess_noise" in gaia_result.columns:
             if not np.ma.is_masked(gaia_result["astrometric_excess_noise"]):
@@ -743,13 +803,16 @@ class EpochAstrometry(ExoGaia):
 
         if "non_single_star" in gaia_result.columns:
             if not np.ma.is_masked(gaia_result["non_single_star"]):
-                print(f"Non single star = {bool(gaia_result['non_single_star'])}")
+                print(f"Non single star = {gaia_result['non_single_star']}")
 
         return [ra, dec, parallax, pmra, pmdec, phot_g_mean_mag]
 
     @beartype
     def retrieve_data(
-        self, source_id: typing.Optional[typing.Union[int, str]] = None
+        self,
+        source_id: typing.Optional[typing.Union[int, str]] = None,
+        exclude_outliers: bool = True,
+        combine_ccds: bool = False,
     ) -> None:
         """
         Method for retrieving the epoch astrometry for the selected
@@ -761,6 +824,15 @@ class EpochAstrometry(ExoGaia):
         source_id : int, str
             Gaia source ID for the selected ``gaia_release`` of the
             class initialization.
+        exclude_outliers : bool
+            Exclude astrometry points that are flagged in the table
+            as outlier (default: True). To be implemented.
+        combine_ccds : bool
+            Combine/average the measurements of the 9 CCDs per
+            transit ID (default: False). The weighted combination
+            of the positions and uncertainties is calculated,
+            assuming uncorrelated uncertainties between CCDs.
+            To be implemented.
 
         Returns
         -------
@@ -772,10 +844,6 @@ class EpochAstrometry(ExoGaia):
 
         self.print_section("Retrieving epoch astrometry")
 
-        # Gaia DR4 epoch astrometry tables
-        # gaiadr4.epoch_astrometry
-        # gaiadr4.bright_source_astrometry
-
         if self.gaia_release in ["DR4", "DR5"]:
             raise ValueError(
                 "The 'retrieve_data' method will only support "
@@ -785,7 +853,14 @@ class EpochAstrometry(ExoGaia):
         print(f"Gaia release: {self.gaia_release}")
         print(f"Source ID: {source_id}")
 
-        for table_item in ["nss_acceleration_astro", "nss_two_body_orbit"]:
+        gaia_tables = [
+            "epoch_astrometry",
+            "bright_source_astrometry",
+            "nss_acceleration_astro",
+            "nss_two_body_orbit",
+        ]
+
+        for table_item in gaia_tables:
             print(f"\nTable: gaia{self.gaia_release.lower()}.{table_item}")
 
             # Query Gaia source ID in NSS tables for selected Gaia source ID
@@ -801,6 +876,7 @@ class EpochAstrometry(ExoGaia):
             gaia_job = Gaia.launch_job_async(
                 gaia_query, dump_to_file=False, verbose=False
             )
+
             gaia_result = gaia_job.get_results()
 
             if len(gaia_result) > 0:
@@ -811,8 +887,18 @@ class EpochAstrometry(ExoGaia):
             else:
                 print(f"\nSource not found in {table_item}")
 
+            if exclude_outliers:
+                pass
+
+            if combine_ccds:
+                pass
+
     @beartype
-    def gaia_bh3(self) -> None:
+    def gaia_bh3(
+        self,
+        exclude_outliers: bool = True,
+        combine_ccds: bool = False,
+    ) -> None:
         """
         Method for storing the Gaia DR3 epoch astrometry of
         the black hole Gaia BH3 in the ``data_table``. The
@@ -820,11 +906,26 @@ class EpochAstrometry(ExoGaia):
         tomasstolker/exogaia/blob/main/data/
         gaiabh3_epochast.dat>`_.
 
+        Parameters
+        ----------
+        exclude_outliers : bool
+            Exclude astrometry points that are flagged in the table
+            as outlier (default: True).
+        combine_ccds : bool
+            Combine/average the measurements of the 9 CCDs per
+            transit ID (default: False). The weighted combination
+            of the positions and uncertainties is calculated,
+            assuming uncorrelated uncertainties between CCDs.
+
         Returns
         -------
         NoneType
             None
         """
+
+        source_id = 4318465066420528000
+
+        _ = self.query_source(source_id=source_id, gaia_release="DR3")
 
         self.print_section("Gaia BH3 epoch data")
 
@@ -837,7 +938,7 @@ class EpochAstrometry(ExoGaia):
 
         print(f"Gaia release: {self.gaia_release}")
         print(f"Reference epoch: {self.ref_epoch}")
-        print("Source ID: 4318465066420528000")
+        print(f"Source ID: {source_id}")
 
         if self.primary_mass is None:
             self.primary_mass = (0.76, 0.05)  # (Msun)
@@ -849,6 +950,55 @@ class EpochAstrometry(ExoGaia):
         self.data_table = pd.read_csv(
             data_file, sep=r"\s+", header="infer", comment="#", skip_blank_lines=True
         )
+
+        self.data_table["centroid_pos_al"] = self.data_table["centroid_pos_al"]
+        self.data_table["centroid_pos_error_al"] = self.data_table[
+            "centroid_pos_error_al"
+        ]
+
+        if exclude_outliers:
+            self.data_table = self.data_table[self.data_table["outlier_flag"] == 0]
+
+        if combine_ccds:
+            cols_to_keep = [
+                "transit_id",
+                "obs_time_tcb",
+                "parallax_factor_al",
+                "scan_pos_angle",
+                "centroid_pos_al",
+                "centroid_pos_error_al",
+            ]
+
+            # Select the central row/CCD for each transit
+            agg_dict = {col: lambda x: x.iloc[len(x) // 2] for col in cols_to_keep}
+
+            def weighted_mean(al_pos, al_err):
+                weight = 1.0 / al_err**2
+                return np.sum(weight * al_pos) / np.sum(weight)
+
+            def weighted_error(al_err):
+                return 1.0 / np.sqrt(np.sum(1.0 / al_err**2))
+
+            agg_dict["centroid_pos_al"] = lambda x: weighted_mean(
+                x.values, self.data_table.loc[x.index, "centroid_pos_error_al"].values
+            )
+
+            agg_dict["centroid_pos_error_al"] = weighted_error
+
+            df_transit = (
+                self.data_table[cols_to_keep]
+                .groupby("transit_id", sort=False)
+                .agg(agg_dict)
+                .reset_index(drop=True)
+            )
+
+            self.data_table = df_transit
+
+        # Convert scan angles from degrees to radians
+        # Store the sin and cos since only these are needed
+        scan_ang = np.radians(self.data_table["scan_pos_angle"])
+        self.data_table["sin_scan_ang"] = np.sin(scan_ang)
+        self.data_table["cos_scan_ang"] = np.cos(scan_ang)
 
         # Convert from Julian days to Julian years
         self.data_table["obs_time_tcb"] = Time(
