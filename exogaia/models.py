@@ -353,9 +353,11 @@ class BinaryModel(ExoGaia):
         Returns
         -------
         np.ndarray
-            Array with :math:`x` coordinates (au) in the orbital plane.
+            Array with :math:`x` coordinates in the orbital plane,
+            in units of the semi-major axis.
         np.ndarray
-            Array with :math:`y` coordinates (au) in the orbital plane.
+            Array with :math:`y` coordinates in the orbital plane,
+            in units of the semi-major axis.
         """
 
         if rel_time_day is None:
@@ -375,7 +377,8 @@ class BinaryModel(ExoGaia):
         # Solve Kepler's equation
         ecc_anom, _, _ = kepler.kepler(mean_anom_obs, ecc)
 
-        # (x, y) position in the orbital plane (au)
+        # (x, y) position in the orbital plane
+        # in units of the semi-major axis.
         x_orb = np.cos(ecc_anom) - ecc
         y_orb = np.sqrt(1.0 - ecc**2) * np.sin(ecc_anom)
 
@@ -488,6 +491,8 @@ class BinaryModel(ExoGaia):
 
         # Rotate (x_orb, y_orb) into sky plane (x_sky, y_sky)
         # See equation 9 in Holl et al. (2023)
+        # The units of x_sky and y_sky are au
+        # because the TI constants have units of au
         x_sky = thiele_innes_b * x_orb + thiele_innes_g * y_orb
         y_sky = thiele_innes_a * x_orb + thiele_innes_f * y_orb
 

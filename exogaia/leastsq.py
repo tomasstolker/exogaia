@@ -25,7 +25,11 @@ from exogaia.models import BinaryModel, StarModel
 
 class LeastSquares(ExoGaia):
     """
-    Class for least-squares model fit of epoch astrometry.
+    Class for least-squares model fit of epoch astrometry. The best-fit
+    parameters and astrometric model, and the corresponding
+    parameter covariance matrix and RUWE are stored as the
+    ``best_model``, ``best_param``, ``param_cov``, and ``ruwe``
+    attributes after running any of the class methods.
     """
 
     @beartype
@@ -50,6 +54,12 @@ class LeastSquares(ExoGaia):
         self.time_end = epoch_astrometry.time_end
         pos_err = self.data_table["centroid_pos_error_al"].to_numpy()
         self.inv_cov = np.diag(1.0 / pos_err**2)
+
+        # Initialize attributes for least-squares results
+        self.best_model = None
+        self.best_param = None
+        self.param_cov = None
+        self.ruwe = None
 
     def least_squares(
         self,
@@ -243,7 +253,7 @@ class LeastSquares(ExoGaia):
         self,
         plot_file: typing.Optional[str] = None,
         verbose: bool = True,
-    ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    ) -> typing.Optional[Figure]:
         """
         Method for a least-squares fit of the the epoch astrometry
         with a 5-parameter model for a single star.
@@ -258,14 +268,8 @@ class LeastSquares(ExoGaia):
 
         Returns
         -------
-        np.ndarray
-            Array with the best-fit model astrometry.
-        np.ndarray
-            Array with the best-fit parameters
-        np.ndarray
-            Array with the parameter covariance matrix.
-        float
-            RUWE of the fit.
+        Figure
+            Matplotlib ``Figure`` object.
         """
 
         if verbose:
@@ -291,23 +295,33 @@ class LeastSquares(ExoGaia):
             ]
         )
 
-        best_model, best_param, param_cov, ruwe = self.least_squares(
-            design, verbose=verbose
+        self.best_model, self.best_param, self.param_cov, self.ruwe = (
+            self.least_squares(design, verbose=verbose)
         )
 
-        param_sig = np.sqrt(np.diag(param_cov))
+        param_sig = np.sqrt(np.diag(self.param_cov))
 
-        residuals = obs_pos - best_model
+        residuals = obs_pos - self.best_model
 
         res_ra, res_dec = sin_scan_ang * residuals, cos_scan_ang * residuals
 
         if verbose:
             print("\nBest-fit parameters:")
-            print(f"   - RA offset = {best_param[0]:.3f} +/- {param_sig[0]:.3f} mas")
-            print(f"   - Dec offset = {best_param[1]:.3f} +/- {param_sig[1]:.3f} mas")
-            print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
-            print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
-            print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
+            print(
+                f"   - RA offset = {self.best_param[0]:.3f} +/- {param_sig[0]:.3f} mas"
+            )
+            print(
+                f"   - Dec offset = {self.best_param[1]:.3f} +/- {param_sig[1]:.3f} mas"
+            )
+            print(
+                f"   - Parallax = {self.best_param[2]:.3f} +/- {param_sig[2]:.3f} mas"
+            )
+            print(
+                f"   - mu in RA = {self.best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr"
+            )
+            print(
+                f"   - mu in Dec = {self.best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr"
+            )
 
         # Create plot with residuals
 
@@ -315,7 +329,7 @@ class LeastSquares(ExoGaia):
             star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
 
             delta_ra_obs, delta_dec_obs, _ = star_model.calc_2d_model(
-                model_param=best_param, obs_time=None
+                model_param=self.best_param, obs_time=None
             )
 
             time_full = np.linspace(
@@ -323,10 +337,12 @@ class LeastSquares(ExoGaia):
             )
 
             delta_ra_full, delta_dec_full, _ = star_model.calc_2d_model(
-                model_param=best_param, obs_time=time_full
+                model_param=self.best_param, obs_time=time_full
             )
 
-            _, axs = plt.subplots(1, 2, figsize=(14, 4), gridspec_kw={"wspace": -0.05})
+            fig, axs = plt.subplots(
+                1, 2, figsize=(14, 4), gridspec_kw={"wspace": -0.05}
+            )
 
             axs[0].set_aspect("equal", adjustable="box")
 
@@ -377,14 +393,15 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"$\Delta$RA = {best_param[0]:.3f} mas $\pm$ {param_sig[0]:.3f} mas"
+                rf"$\Delta$RA = {self.best_param[0]:.3f} mas $\pm$ {param_sig[0]:.3f} mas"
                 + "\n"
-                rf"$\Delta$Dec = {best_param[1]:.3f} mas $\pm$ {param_sig[1]:.3f} mas"
+                rf"$\Delta$Dec = {self.best_param[1]:.3f} mas $\pm$ {param_sig[1]:.3f} mas"
                 + "\n"
-                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas" + "\n"
-                rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
+                rf"$\varpi$ = {self.best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas"
                 + "\n"
-                rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
+                rf"$\mu_\mathrm{{RA}}$ = {self.best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
+                + "\n"
+                rf"$\mu_\mathrm{{Dec}}$ = {self.best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
             )
 
             axs[1].errorbar(
@@ -442,7 +459,7 @@ class LeastSquares(ExoGaia):
             axs[1].text(
                 0.03,
                 0.92,
-                f"RUWE = {ruwe:.3f}",
+                f"RUWE = {self.ruwe:.3f}",
                 ha="left",
                 va="center",
                 transform=axs[1].transAxes,
@@ -451,14 +468,14 @@ class LeastSquares(ExoGaia):
 
             plt.savefig(plot_file)
 
-        return best_model, best_param, param_cov, ruwe
+            return fig
 
     @beartype
     def accel_7param(
         self,
         plot_file: typing.Optional[str] = None,
         verbose: bool = True,
-    ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    ) -> typing.Optional[Figure]:
         """
         Method for a least-squares fit of the the epoch astrometry
         with a 7-parameter model for a star with a proper motion
@@ -474,14 +491,8 @@ class LeastSquares(ExoGaia):
 
         Returns
         -------
-        np.ndarray
-            Array with the best-fit model astrometry.
-        np.ndarray
-            Array with the best-fit parameters
-        np.ndarray
-            Array with the parameter covariance matrix.
-        float
-            RUWE of the fit.
+        Figure
+            Matplotlib ``Figure`` object.
         """
 
         if verbose:
@@ -509,13 +520,13 @@ class LeastSquares(ExoGaia):
             ]
         )
 
-        best_model, best_param, param_cov, ruwe = self.least_squares(
-            design, verbose=verbose
+        self.best_model, self.best_param, self.param_cov, self.ruwe = (
+            self.least_squares(design, verbose=verbose)
         )
 
-        param_sig = np.sqrt(np.diag(param_cov))
+        param_sig = np.sqrt(np.diag(self.param_cov))
 
-        residuals = obs_pos - best_model
+        residuals = obs_pos - self.best_model
 
         res_ra, res_dec = (
             sin_scan_ang * residuals,
@@ -524,16 +535,26 @@ class LeastSquares(ExoGaia):
 
         if verbose:
             print("\nBest-fit parameters:")
-            print(f"   - RA offset = {best_param[0]:.3f} +/- {param_sig[0]:.3f} mas")
-            print(f"   - Dec offset = {best_param[1]:.3f} +/- {param_sig[1]:.3f} mas")
-            print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
-            print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
-            print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
             print(
-                f"   - dmu/dt in RA = {best_param[5]:.3f} +/- {param_sig[5]:.3f} mas/yr^2"
+                f"   - RA offset = {self.best_param[0]:.3f} +/- {param_sig[0]:.3f} mas"
             )
             print(
-                f"   - dmu/dt in Dec = {best_param[6]:.3f} +/- {param_sig[6]:.3f} mas/yr^2"
+                f"   - Dec offset = {self.best_param[1]:.3f} +/- {param_sig[1]:.3f} mas"
+            )
+            print(
+                f"   - Parallax = {self.best_param[2]:.3f} +/- {param_sig[2]:.3f} mas"
+            )
+            print(
+                f"   - mu in RA = {self.best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr"
+            )
+            print(
+                f"   - mu in Dec = {self.best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr"
+            )
+            print(
+                f"   - dmu/dt in RA = {self.best_param[5]:.3f} +/- {param_sig[5]:.3f} mas/yr^2"
+            )
+            print(
+                f"   - dmu/dt in Dec = {self.best_param[6]:.3f} +/- {param_sig[6]:.3f} mas/yr^2"
             )
 
         if plot_file is not None:
@@ -542,7 +563,7 @@ class LeastSquares(ExoGaia):
             star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
 
             delta_ra_obs, delta_dec_obs, _ = star_model.calc_2d_model(
-                model_param=best_param, obs_time=None
+                model_param=self.best_param, obs_time=None
             )
 
             time_full = np.linspace(
@@ -550,7 +571,7 @@ class LeastSquares(ExoGaia):
             )
 
             delta_ra_full, delta_dec_full, _ = star_model.calc_2d_model(
-                model_param=best_param, obs_time=time_full
+                model_param=self.best_param, obs_time=time_full
             )
 
             # Stellar track, without acceleration
@@ -558,12 +579,12 @@ class LeastSquares(ExoGaia):
             star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
 
             delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_2d_model(
-                model_param=best_param[:5], obs_time=None
+                model_param=self.best_param[:5], obs_time=None
             )
 
             delta_ra_no_accel_full, delta_dec_no_accel_full, _ = (
                 star_no_accel.calc_2d_model(
-                    model_param=best_param[:5], obs_time=time_full
+                    model_param=self.best_param[:5], obs_time=time_full
                 )
             )
 
@@ -574,7 +595,7 @@ class LeastSquares(ExoGaia):
 
             # Create plot with residuals
 
-            _, axs = plt.subplots(1, 3, figsize=(18, 4), gridspec_kw={"wspace": 0.25})
+            fig, axs = plt.subplots(1, 3, figsize=(18, 4), gridspec_kw={"wspace": 0.25})
 
             # axs[0].set_aspect("equal", adjustable="box")
             # axs[1].set_aspect("equal", adjustable="box")
@@ -626,14 +647,15 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"$\Delta$RA = {best_param[0]:.3f} mas $\pm$ {param_sig[0]:.3f} mas"
+                rf"$\Delta$RA = {self.best_param[0]:.3f} mas $\pm$ {param_sig[0]:.3f} mas"
                 + "\n"
-                rf"$\Delta$Dec = {best_param[1]:.3f} mas $\pm$ {param_sig[1]:.3f} mas"
+                rf"$\Delta$Dec = {self.best_param[1]:.3f} mas $\pm$ {param_sig[1]:.3f} mas"
                 + "\n"
-                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas" + "\n"
-                rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
+                rf"$\varpi$ = {self.best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas"
                 + "\n"
-                rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
+                rf"$\mu_\mathrm{{RA}}$ = {self.best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
+                + "\n"
+                rf"$\mu_\mathrm{{Dec}}$ = {self.best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
             )
 
             axs[0].set_xlabel(r"$\Delta\alpha$ (mas)")
@@ -729,9 +751,9 @@ class LeastSquares(ExoGaia):
             )
 
             axs[1].set_title(
-                rf"$\dot{{\mu}}_\mathrm{{RA}}$ = {1e3*best_param[5]:.3f} "
+                rf"$\dot{{\mu}}_\mathrm{{RA}}$ = {1e3*self.best_param[5]:.3f} "
                 rf"$\pm$ {1e3*param_sig[5]:.3f} $\mu$as/yr$^2$" + "\n"
-                rf"$\dot{{\mu}}_\mathrm{{Dec}}$ = {1e3*best_param[6]:.3f} "
+                rf"$\dot{{\mu}}_\mathrm{{Dec}}$ = {1e3*self.best_param[6]:.3f} "
                 rf"$\pm$ {1e3*param_sig[6]:.3f} $\mu$as/yr$^2$"
             )
 
@@ -789,7 +811,7 @@ class LeastSquares(ExoGaia):
             axs[2].text(
                 0.04,
                 0.92,
-                f"RUWE = {ruwe:.3f}",
+                f"RUWE = {self.ruwe:.3f}",
                 ha="left",
                 va="center",
                 transform=axs[2].transAxes,
@@ -798,14 +820,14 @@ class LeastSquares(ExoGaia):
 
             plt.savefig(plot_file)
 
-        return best_model, best_param, param_cov, ruwe
+            return fig
 
     @beartype
     def accel_9param(
         self,
         plot_file: typing.Optional[str] = None,
         verbose: bool = True,
-    ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    ) -> typing.Optional[Figure]:
         """
         Method for a least-squares fit of the the epoch astrometry
         with a 9-parameter model for a star with a proper motion
@@ -821,14 +843,8 @@ class LeastSquares(ExoGaia):
 
         Returns
         -------
-        np.ndarray
-            Array with the best-fit model astrometry.
-        np.ndarray
-            Array with the best-fit parameters
-        np.ndarray
-            Array with the parameter covariance matrix.
-        float
-            RUWE of the fit.
+        Figure
+            Matplotlib ``Figure`` object.
         """
 
         if verbose:
@@ -858,13 +874,13 @@ class LeastSquares(ExoGaia):
             ]
         )
 
-        best_model, best_param, param_cov, ruwe = self.least_squares(
-            design, verbose=verbose
+        self.best_model, self.best_param, self.param_cov, self.ruwe = (
+            self.least_squares(design, verbose=verbose)
         )
 
-        param_sig = np.sqrt(np.diag(param_cov))
+        param_sig = np.sqrt(np.diag(self.param_cov))
 
-        residuals = obs_pos - best_model
+        residuals = obs_pos - self.best_model
 
         res_ra, res_dec = (
             sin_scan_ang * residuals,
@@ -873,22 +889,32 @@ class LeastSquares(ExoGaia):
 
         if verbose:
             print("\nBest-fit parameters:")
-            print(f"   - RA offset = {best_param[0]:.3f} +/- {param_sig[0]:.3f} mas")
-            print(f"   - Dec offset = {best_param[1]:.3f} +/- {param_sig[1]:.3f} mas")
-            print(f"   - Parallax = {best_param[2]:.3f} +/- {param_sig[2]:.3f} mas")
-            print(f"   - mu in RA = {best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr")
-            print(f"   - mu in Dec = {best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr")
             print(
-                f"   - dmu/dt in RA = {best_param[5]:.3f} +/- {param_sig[5]:.3f} mas/yr^2"
+                f"   - RA offset = {self.best_param[0]:.3f} +/- {param_sig[0]:.3f} mas"
             )
             print(
-                f"   - dmu/dt in Dec = {best_param[6]:.3f} +/- {param_sig[6]:.3f} mas/yr^2"
+                f"   - Dec offset = {self.best_param[1]:.3f} +/- {param_sig[1]:.3f} mas"
             )
             print(
-                f"   - d^2mu/d^2t in RA = {best_param[7]:.3f} +/- {param_sig[7]:.3f} mas/yr^3"
+                f"   - Parallax = {self.best_param[2]:.3f} +/- {param_sig[2]:.3f} mas"
             )
             print(
-                f"   - d^2mu/d^2t in Dec = {best_param[8]:.3f} +/- {param_sig[8]:.3f} mas/yr^3"
+                f"   - mu in RA = {self.best_param[3]:.3f} +/- {param_sig[3]:.3f} mas/yr"
+            )
+            print(
+                f"   - mu in Dec = {self.best_param[4]:.3f} +/- {param_sig[4]:.3f} mas/yr"
+            )
+            print(
+                f"   - dmu/dt in RA = {self.best_param[5]:.3f} +/- {param_sig[5]:.3f} mas/yr^2"
+            )
+            print(
+                f"   - dmu/dt in Dec = {self.best_param[6]:.3f} +/- {param_sig[6]:.3f} mas/yr^2"
+            )
+            print(
+                f"   - d^2mu/d^2t in RA = {self.best_param[7]:.3f} +/- {param_sig[7]:.3f} mas/yr^3"
+            )
+            print(
+                f"   - d^2mu/d^2t in Dec = {self.best_param[8]:.3f} +/- {param_sig[8]:.3f} mas/yr^3"
             )
 
         if plot_file is not None:
@@ -897,7 +923,7 @@ class LeastSquares(ExoGaia):
             star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
 
             delta_ra_obs, delta_dec_obs, _ = star_model.calc_2d_model(
-                model_param=best_param, obs_time=None
+                model_param=self.best_param, obs_time=None
             )
 
             time_full = np.linspace(
@@ -905,7 +931,7 @@ class LeastSquares(ExoGaia):
             )
 
             delta_ra_full, delta_dec_full, _ = star_model.calc_2d_model(
-                model_param=best_param, obs_time=time_full
+                model_param=self.best_param, obs_time=time_full
             )
 
             # Stellar track, without acceleration
@@ -913,12 +939,12 @@ class LeastSquares(ExoGaia):
             star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
 
             delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_2d_model(
-                model_param=best_param[:5], obs_time=None
+                model_param=self.best_param[:5], obs_time=None
             )
 
             delta_ra_no_accel_full, delta_dec_no_accel_full, _ = (
                 star_no_accel.calc_2d_model(
-                    model_param=best_param[:5], obs_time=time_full
+                    model_param=self.best_param[:5], obs_time=time_full
                 )
             )
 
@@ -929,7 +955,7 @@ class LeastSquares(ExoGaia):
 
             # Create plot with residuals
 
-            _, axs = plt.subplots(1, 3, figsize=(18, 4), gridspec_kw={"wspace": 0.25})
+            fig, axs = plt.subplots(1, 3, figsize=(18, 4), gridspec_kw={"wspace": 0.25})
 
             # axs[0].set_aspect("equal", adjustable="box")
             # axs[1].set_aspect("equal", adjustable="box")
@@ -980,14 +1006,15 @@ class LeastSquares(ExoGaia):
             )
 
             axs[0].set_title(
-                rf"$\Delta$RA = {best_param[0]:.3f} mas $\pm$ {param_sig[0]:.3f} mas"
+                rf"$\Delta$RA = {self.best_param[0]:.3f} mas $\pm$ {param_sig[0]:.3f} mas"
                 + "\n"
-                rf"$\Delta$Dec = {best_param[1]:.3f} mas $\pm$ {param_sig[1]:.3f} mas"
+                rf"$\Delta$Dec = {self.best_param[1]:.3f} mas $\pm$ {param_sig[1]:.3f} mas"
                 + "\n"
-                rf"$\varpi$ = {best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas" + "\n"
-                rf"$\mu_\mathrm{{RA}}$ = {best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
+                rf"$\varpi$ = {self.best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas"
                 + "\n"
-                rf"$\mu_\mathrm{{Dec}}$ = {best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
+                rf"$\mu_\mathrm{{RA}}$ = {self.best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
+                + "\n"
+                rf"$\mu_\mathrm{{Dec}}$ = {self.best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
             )
 
             axs[0].set_xlabel(r"$\Delta\alpha$ (mas)")
@@ -1083,13 +1110,13 @@ class LeastSquares(ExoGaia):
             )
 
             axs[1].set_title(
-                rf"$\dot{{\mu}}_\mathrm{{RA}}$ = {1e3*best_param[5]:.3f} "
+                rf"$\dot{{\mu}}_\mathrm{{RA}}$ = {1e3*self.best_param[5]:.3f} "
                 rf"$\pm$ {1e3*param_sig[5]:.3f} $\mu$as/yr$^2$" + "\n"
-                rf"$\dot{{\mu}}_\mathrm{{Dec}}$ = {1e3*best_param[6]:.3f} "
+                rf"$\dot{{\mu}}_\mathrm{{Dec}}$ = {1e3*self.best_param[6]:.3f} "
                 rf"$\pm$ {1e3*param_sig[6]:.3f} $\mu$as/yr$^2$" + "\n"
-                rf"$\ddot{{\mu}}_\mathrm{{RA}}$ = {1e3*best_param[7]:.3f} "
+                rf"$\ddot{{\mu}}_\mathrm{{RA}}$ = {1e3*self.best_param[7]:.3f} "
                 rf"$\pm$ {1e3*param_sig[7]:.3f} $\mu$as/yr$^3$" + "\n"
-                rf"$\ddot{{\mu}}_\mathrm{{Dec}}$ = {1e3*best_param[8]:.3f} "
+                rf"$\ddot{{\mu}}_\mathrm{{Dec}}$ = {1e3*self.best_param[8]:.3f} "
                 rf"$\pm$ {1e3*param_sig[8]:.3f} $\mu$as/yr$^3$"
             )
 
@@ -1147,7 +1174,7 @@ class LeastSquares(ExoGaia):
             axs[2].text(
                 0.04,
                 0.92,
-                f"RUWE = {ruwe:.3f}",
+                f"RUWE = {self.ruwe:.3f}",
                 ha="left",
                 va="center",
                 transform=axs[2].transAxes,
@@ -1156,12 +1183,12 @@ class LeastSquares(ExoGaia):
 
             plt.savefig(plot_file)
 
-        return best_model, best_param, param_cov, ruwe
+            return fig
 
     @beartype
     def orbit_grid(
         self, plot_file: typing.Optional[str] = None, n_points: int = 50
-    ) -> Figure:
+    ) -> typing.Optional[Figure]:
         """
         Method for exploring a grid of orbits of varying semi-major
         axis, eccentricity, and time of periastron. The semi-major
@@ -1219,7 +1246,7 @@ class LeastSquares(ExoGaia):
         # mass_grid = np.zeros((logp_list.size, ecc_list.size, tau_list.size))
 
         global_ruwe = np.inf
-        # global_model = None
+        global_model = None
         global_param = None
         global_sigma = None
         global_orbit = None
@@ -1261,7 +1288,7 @@ class LeastSquares(ExoGaia):
 
                     if ruwe < global_ruwe:
                         global_ruwe = ruwe
-                        # global_model = best_model
+                        global_model = best_model
                         global_param = best_param
                         global_cov = param_cov
                         global_orbit = [period, ecc_item, tau_item]
@@ -1466,7 +1493,6 @@ class LeastSquares(ExoGaia):
         #
         # ax.clabel(cs, cs.levels, inline=True, fontsize=8, fmt="%1.1f")
 
-        # ax.set_xlabel(r"$\log{P/\mathrm{days}$")
         ax.set_xlabel("Period (days)")
         ax.set_ylabel("Eccentricity")
         ax.set_xscale("log")
@@ -1475,5 +1501,10 @@ class LeastSquares(ExoGaia):
             plt.show()
         else:
             plt.savefig(plot_file)
+
+        self.best_model = global_model
+        self.best_param = global_param
+        self.param_cov = global_cov
+        self.ruwe = global_ruwe
 
         return fig

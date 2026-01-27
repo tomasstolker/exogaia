@@ -82,19 +82,22 @@ class NestedSampler(ExoGaia):
 
         least_sq = LeastSquares(epoch_astrometry=self.epoch_astrometry)
 
-        _, best_param, _, ruwe = least_sq.singl_5param()
+        least_sq.singl_5param(plot_file=None, verbose=True)
 
-        if ruwe > 1.1:
-            _, best_param, _, ruwe = least_sq.accel_7param()
+        if least_sq.ruwe > 1.1:
+            least_sq.accel_7param(plot_file=None, verbose=True)
 
-        if ruwe > 1.1:
-            _, best_param, _, ruwe = least_sq.accel_9param()
+        if least_sq.ruwe > 1.1:
+            least_sq.accel_9param(plot_file=None, verbose=True)
 
-        self.priors["ra_offset"] = NormalPrior(best_param[0], 0.1)
-        self.priors["dec_offset"] = NormalPrior(best_param[1], 0.1)
-        self.priors["parallax"] = NormalPrior(best_param[2], 0.1)
-        self.priors["pmra"] = NormalPrior(best_param[3], 0.1)
-        self.priors["pmdec"] = NormalPrior(best_param[4], 0.1)
+        if least_sq.ruwe > 1.1:
+            least_sq.orbit_grid(plot_file=None, n_points=30)
+
+        self.priors["ra_offset"] = NormalPrior(least_sq.best_param[0], 0.1)
+        self.priors["dec_offset"] = NormalPrior(least_sq.best_param[1], 0.1)
+        self.priors["parallax"] = NormalPrior(least_sq.best_param[2], 0.1)
+        self.priors["pmra"] = NormalPrior(least_sq.best_param[3], 0.1)
+        self.priors["pmdec"] = NormalPrior(least_sq.best_param[4], 0.1)
         self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
         self.priors["ecc"] = UniformPrior(0.0, 1.0)
         self.priors["inc"] = SinPrior()
@@ -848,19 +851,22 @@ class MCMCSampler(ExoGaia):
 
         least_sq = LeastSquares(epoch_astrometry=self.epoch_astrometry)
 
-        _, best_param, _, ruwe = least_sq.singl_5param()
+        least_sq.singl_5param(plot_file=None, verbose=True)
 
-        if ruwe > 1.1:
-            _, best_param, _, ruwe = least_sq.accel_7param()
+        if least_sq.ruwe > 1.1:
+            least_sq.accel_7param(plot_file=None, verbose=True)
 
-        if ruwe > 1.1:
-            _, best_param, _, ruwe = least_sq.accel_9param()
+        if least_sq.ruwe > 1.1:
+            least_sq.accel_9param(plot_file=None, verbose=True)
 
-        self.priors["ra_offset"] = NormalPrior(best_param[0], 0.1)
-        self.priors["dec_offset"] = NormalPrior(best_param[1], 0.1)
-        self.priors["parallax"] = NormalPrior(best_param[2], 0.1)
-        self.priors["pmra"] = NormalPrior(best_param[3], 0.1)
-        self.priors["pmdec"] = NormalPrior(best_param[4], 0.1)
+        if least_sq.ruwe > 1.1:
+            least_sq.orbit_grid(plot_file=None, n_points=30)
+
+        self.priors["ra_offset"] = NormalPrior(least_sq.best_param[0], 0.1)
+        self.priors["dec_offset"] = NormalPrior(least_sq.best_param[1], 0.1)
+        self.priors["parallax"] = NormalPrior(least_sq.best_param[2], 0.1)
+        self.priors["pmra"] = NormalPrior(least_sq.best_param[3], 0.1)
+        self.priors["pmdec"] = NormalPrior(least_sq.best_param[4], 0.1)
         self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
         self.priors["ecc"] = UniformPrior(0.0, 1.0)
         self.priors["inc"] = SinPrior()

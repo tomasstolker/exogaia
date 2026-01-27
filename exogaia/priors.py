@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from beartype import beartype, typing
+from beartype import beartype
 from scipy.stats import norm, truncnorm
 
 
