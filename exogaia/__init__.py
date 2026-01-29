@@ -12,7 +12,7 @@ import matplotlib as mpl
 from exogaia.data import EpochAstrometry
 from exogaia.leastsq import LeastSquares
 from exogaia.limits import CompletenessMap
-from exogaia.models import BinaryModel
+from exogaia.models import KeplerModel
 from exogaia.priors import (
     FixedPrior,
     LogUniformPrior,

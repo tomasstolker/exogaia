@@ -18,7 +18,7 @@ from schwimmbad import MPIPool
 from exogaia.core import ExoGaia
 from exogaia.data import EpochAstrometry
 from exogaia.leastsq import LeastSquares
-from exogaia.models import BinaryModel
+from exogaia.models import KeplerModel
 from exogaia.priors import (
     FixedPrior,
     LogUniformPrior,
@@ -60,7 +60,7 @@ class NestedSampler(ExoGaia):
         self.priors = {}
         self.set_priors()
 
-        self.binary_model = BinaryModel(
+        self.kepler_model = KeplerModel(
             epoch_astrometry=self.epoch_astrometry, verbose=False
         )
 
@@ -98,16 +98,17 @@ class NestedSampler(ExoGaia):
         self.priors["parallax"] = NormalPrior(least_sq.best_param[2], 0.1)
         self.priors["pmra"] = NormalPrior(least_sq.best_param[3], 0.1)
         self.priors["pmdec"] = NormalPrior(least_sq.best_param[4], 0.1)
-        self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
+        self.priors["period"] = LogUniformPrior(1e1, 1e5)
         self.priors["ecc"] = UniformPrior(0.0, 1.0)
+        self.priors["tau"] = UniformPrior(0.0, 1.0)
+        self.priors["sma_0"] = LogUniformPrior(1e-3, 100.0)
         self.priors["inc"] = SinPrior()
         self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
         self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
-        self.priors["tau"] = UniformPrior(0.0, 1.0)
-        self.priors["mass_1"] = NormalPrior(
-            self.primary_mass[0], self.primary_mass[1], truncate_zero=True
-        )
-        self.priors["mass_2"] = LogUniformPrior(1e-3, 1.0)
+        # self.priors["mass_1"] = NormalPrior(
+        #     self.primary_mass[0], self.primary_mass[1], truncate_zero=True
+        # )
+        # self.priors["mass_2"] = LogUniformPrior(1e-3, 1.0)
 
     @beartype
     def prior_transform(self, cube):
@@ -142,33 +143,37 @@ class NestedSampler(ExoGaia):
         cube[3] = self.priors["pmra"].draw_samples(1)
         cube[4] = self.priors["pmdec"].draw_samples(1)
 
-        # Semi-major axis (au)
-        # Default: log-uniform [log10(1e-3), log10(2)]
-        cube[5] = self.priors["sma"].draw_samples(1)
+        # Period (days)
+        # Default: log-uniform [log10(1e1), log10(5)]
+        cube[5] = self.priors["period"].draw_samples(1)
 
         # Eccentricity
         # Default: uniform [0, 1]
         cube[6] = self.priors["ecc"].draw_samples(1)
 
+        # Epoch of periastron
+        # Default: uniform [0, 1]
+        cube[7] = self.priors["tau"].draw_samples(1)
+
+        # Semi-major axis of photocenter (mas)
+        # Default: log-uniform [log10(1e-3), log10(2)]
+        cube[8] = self.priors["sma_0"].draw_samples(1)
+
         # Inclination (rad)
         # Default: isotropic -> i = arccos(1 - 2u)
-        cube[7] = self.priors["inc"].draw_samples(1)
+        cube[9] = self.priors["inc"].draw_samples(1)
 
         # Argument of periastron (rad)
         # Default: uniform [0, 2π]
-        cube[8] = self.priors["aop"].draw_samples(1)
+        cube[10] = self.priors["aop"].draw_samples(1)
 
         # Position angle of ascending node (rad)
         # Default: uniform [0, 2π]
-        cube[9] = self.priors["pan"].draw_samples(1)
-
-        # Epoch of periastron
-        # Default: uniform [0, 1]
-        cube[10] = self.priors["tau"].draw_samples(1)
+        cube[11] = self.priors["pan"].draw_samples(1)
 
         # Primary mass (Msun)
         # Default: normal(primary_mass[0], primary_mass[1])
-        cube[11] = self.priors["mass_1"].draw_samples(1)
+        cube[12] = self.priors["mass_1"].draw_samples(1)
 
         # Secondary mass (Msun)
         if isinstance(self.priors["mass_2"], FixedPrior):
@@ -211,18 +216,18 @@ class NestedSampler(ExoGaia):
             Log-likelihood.
         """
 
-        bin_model = self.binary_model.calc_model(params)
-        # self.binary_model.plot_orbit(params, 'test.png')
+        delta_eta = self.kepler_model.calc_1d_model(params)
+        # self.kepler_model.plot_orbit(params, 'test.png')
 
-        if np.any(np.isnan(bin_model)):
+        if np.any(np.isnan(delta_eta)):
             print("NAN", params)
             return -np.inf
 
-        if np.any(np.isinf(bin_model)):
+        if np.any(np.isinf(delta_eta)):
             print("INF", params)
             return -np.inf
 
-        res = self.data_table["centroid_pos_al"] - bin_model
+        res = self.data_table["centroid_pos_al"] - delta_eta
         var = self.data_table["centroid_pos_error_al"] ** 2
 
         return -0.5 * np.sum(res**2 / var)
@@ -812,7 +817,7 @@ class MCMCSampler(ExoGaia):
         self.priors = {}
         self.set_priors()
 
-        self.binary_model = BinaryModel(
+        self.kepler_model = KeplerModel(
             epoch_astrometry=self.epoch_astrometry, verbose=False
         )
 
@@ -888,7 +893,7 @@ class MCMCSampler(ExoGaia):
         params : np.ndarray
             Array with the model parameters. The order of the parameter
             values should be the same as in the ``calc_model`` method
-            of :class:`~exogaia.models.BinaryModel`.
+            of :class:`~exogaia.models.KeplerModel`.
 
         Returns
         -------
@@ -952,7 +957,7 @@ class MCMCSampler(ExoGaia):
         params : np.ndarray
             Array with the model parameters. The order of the parameter
             values should be the same as in the ``calc_model`` method
-            of :class:`~exogaia.models.BinaryModel`.
+            of :class:`~exogaia.models.KeplerModel`.
 
         Returns
         -------
@@ -960,17 +965,17 @@ class MCMCSampler(ExoGaia):
             Log-likelihood of the model evaluation.
         """
 
-        bin_model = self.binary_model.calc_model(params)
+        delta_eta = self.kepler_model.calc_model(params)
 
-        if np.any(np.isnan(bin_model)):
+        if np.any(np.isnan(delta_eta)):
             print("NAN", params)
             return -np.inf
 
-        if np.any(np.isinf(bin_model)):
+        if np.any(np.isinf(delta_eta)):
             print("INF", params)
             return -np.inf
 
-        res = self.data_table["centroid_pos_al"] - bin_model
+        res = self.data_table["centroid_pos_al"] - delta_eta
         var = self.data_table["centroid_pos_error_al"] ** 2
 
         return -0.5 * np.sum(res**2 / var)
@@ -985,7 +990,7 @@ class MCMCSampler(ExoGaia):
         params : np.ndarray
             Array with the model parameters. The order of the parameter
             values should be the same as in the ``calc_model`` method
-            of :class:`~exogaia.models.BinaryModel`.
+            of :class:`~exogaia.models.KeplerModel`.
 
         Returns
         -------

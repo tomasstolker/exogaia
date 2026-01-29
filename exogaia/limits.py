@@ -149,23 +149,23 @@ class CompletenessMap(ExoGaia):
 
                     least_sq = LeastSquares(epoch_astrometry=self.epoch_astrom)
 
-                    _, best_param, param_cov, _ = least_sq.accel_9param(
-                        plot_file=None, verbose=False
-                    )
+                    least_sq.accel_9param(plot_file=None, verbose=False)
 
                     # Acceleration dmu/dt (mas/yr^2)
                     # Quadratic sum of the RA and Dec components
-                    accel = np.sqrt(best_param[5] ** 2 + best_param[6] ** 2)
+                    accel = np.sqrt(
+                        least_sq.best_param[5] ** 2 + least_sq.best_param[6] ** 2
+                    )
 
                     # Gradient with respect to the RA and Dec components
                     # So delta(a)/delta(a_RA) and delta(a)/delta(a_Dec)
                     # with a = sqrt(a_RA^2 + a_Dec^2)
                     grad_accel = np.array(
-                        [best_param[5] / accel, best_param[6] / accel]
+                        [least_sq.best_param[5] / accel, least_sq.best_param[6] / accel]
                     )
 
                     # Covariance matrix for acceleration in RA and Dec
-                    cov_accel = param_cov[5:7, 5:7]
+                    cov_accel = least_sq.param_cov[5:7, 5:7]
 
                     # Propagate RA and Dec acceleration uncertainty into
                     # uncertainty on total acceleration, while folding in

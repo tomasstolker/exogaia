@@ -20,7 +20,7 @@ from beartype import beartype, typing
 from scipy.interpolate import RegularGridInterpolator
 
 from exogaia.core import ExoGaia
-from exogaia.models import BinaryModel, StarModel
+from exogaia.models import KeplerModel, StarModel
 
 Gaia.ROW_LIMIT = -1
 
@@ -61,6 +61,7 @@ class EpochAstrometry(ExoGaia):
         self.primary_mass = primary_mass
         self.data_table = None
 
+        self.source_id = None
         self.ra = None
         self.dec = None
         self.parallax = None
@@ -182,8 +183,9 @@ class EpochAstrometry(ExoGaia):
             Secondary mass (Msun). A single star is simulated by setting
             the argument to ``None``.
         sma : float, None
-            Semi-major axis (au). A single star is simulated by setting
-            the argument to ``None``.
+            Semi-major axis (au). This should be the relative semi-major
+            axi of the primary and secondary (i.e. a1+a2). A single star
+            is simulated by setting the argument to ``None``.
         ecc : float, None
             Eccentricity. A single star is simulated by setting
             the argument to ``None``.
@@ -252,7 +254,7 @@ class EpochAstrometry(ExoGaia):
         if verbose:
             self.print_section("Simulate data")
 
-        # For simulated data, UWE = RUWE when fitting models
+        # For simulated data, UWE == RUWE when fitting models
 
         self.sim_data = True
 
@@ -531,17 +533,22 @@ class EpochAstrometry(ExoGaia):
             # Use sma in au and masses in Msun
             period = np.sqrt(sma**3 / (mass_1 + mass_2)) * 365.25
 
+            # Semi-major axis of the photocenter/primary (au)
+            sma_0 = sma * mass_2 / (mass_1 + mass_2)
+            sma_0 *= self.parallax  # (mas)
+
             if verbose:
                 print("\nOrbit parameters:")
                 print(f"   - Primary mass (Msun) = {mass_1:.2f}")
                 print(f"   - Secondary mass (Msun) = {mass_2:.2f}")
-                print(f"   - Semi-major axis (au) = {sma:.2f}")
+                print(f"   - Relative semi-major axis (au) = {sma:.2f}")
                 print(f"   - Eccentricity = {ecc:.2f}")
                 print(f"   - Inclination (deg) = {np.degrees(inc):.2f}")
                 print(f"   - Argument of periastron (deg) = {np.degrees(aop):.2f}")
                 print(f"   - PA of ascending node (deg) = {np.degrees(pan):.2f}")
                 print(f"   - Relative time of periastron = {tau:.2f}")
                 print(f"   - Period (days) = {period:.2f}")
+                print(f"   - Semi-major axis of photocenter (mas) = {sma_0:.2f}")
 
             model_param = [
                 ra_offset,
@@ -549,19 +556,18 @@ class EpochAstrometry(ExoGaia):
                 self.parallax,
                 self.pmra,
                 self.pmdec,
-                sma,
+                period,
                 ecc,
+                tau,
+                sma_0,
                 inc,
                 aop,
                 pan,
-                tau,
-                mass_1,
-                mass_2,
             ]
 
             # self is the current EpochAstrometry object
-            bin_model = BinaryModel(epoch_astrometry=self, verbose=False)
-            cen_pos = bin_model.calc_model(model_param=model_param)
+            kepler_model = KeplerModel(epoch_astrometry=self, verbose=False)
+            cen_pos = kepler_model.calc_1d_model(model_param=model_param)
 
         else:
             model_param = [
@@ -693,6 +699,8 @@ class EpochAstrometry(ExoGaia):
 
         self.print_section("Querying source")
 
+        self.source_id = source_id
+
         if gaia_release in ["DR4", "DR5"]:
             raise ValueError(
                 "The 'query_source' method supports "
@@ -700,7 +708,7 @@ class EpochAstrometry(ExoGaia):
             )
 
         print(f"Gaia release: {gaia_release}")
-        print(f"Source ID: {source_id}\n")
+        print(f"Source ID: {self.source_id}\n")
 
         # Retrieve RA, Dec, parallax, proper motion, and G magnitude
 
@@ -708,10 +716,10 @@ class EpochAstrometry(ExoGaia):
         SELECT ra, ra_error, dec, dec_error, parallax, parallax_error,
                pmra, pmra_error, pmdec, pmdec_error, phot_g_mean_mag,
                astrometric_chi2_al, astrometric_n_good_obs_al, ruwe,
-               astrometric_excess_noise, non_single_star,
-               nu_eff_used_in_astrometry
+               astrometric_excess_noise, astrometric_excess_noise_sig,
+               non_single_star, nu_eff_used_in_astrometry
         FROM gaia{gaia_release.lower()}.gaia_source
-        WHERE source_id = {source_id}
+        WHERE source_id = {self.source_id}
         """
 
         gaia_job = Gaia.launch_job_async(gaia_query, dump_to_file=False, verbose=False)
@@ -799,7 +807,10 @@ class EpochAstrometry(ExoGaia):
         if "astrometric_excess_noise" in gaia_result.columns:
             if not np.ma.is_masked(gaia_result["astrometric_excess_noise"]):
                 aen = gaia_result["astrometric_excess_noise"]
-                print(f"Astrometric excess noise (mas) = {aen:.2f}")
+                aen_sig = gaia_result["astrometric_excess_noise_sig"]
+                print(
+                    f"Astrometric excess noise (mas) = {aen:.4f} +/- {aen/aen_sig:.4f}"
+                )
 
         if "non_single_star" in gaia_result.columns:
             if not np.ma.is_masked(gaia_result["non_single_star"]):
@@ -844,6 +855,8 @@ class EpochAstrometry(ExoGaia):
 
         self.print_section("Retrieving epoch astrometry")
 
+        self.source_id = source_id
+
         if self.gaia_release in ["DR4", "DR5"]:
             raise ValueError(
                 "The 'retrieve_data' method will only support "
@@ -851,7 +864,7 @@ class EpochAstrometry(ExoGaia):
             )
 
         print(f"Gaia release: {self.gaia_release}")
-        print(f"Source ID: {source_id}")
+        print(f"Source ID: {self.source_id}")
 
         gaia_tables = [
             "epoch_astrometry",
@@ -868,7 +881,7 @@ class EpochAstrometry(ExoGaia):
             gaia_query = f"""
             SELECT *
             FROM gaia{self.gaia_release.lower()}.{table_item}
-            WHERE source_id = {source_id}
+            WHERE source_id = {self.source_id}
             """
 
             # Launch the Gaia job and get the results
@@ -923,9 +936,9 @@ class EpochAstrometry(ExoGaia):
             None
         """
 
-        source_id = 4318465066420528000
+        self.source_id = 4318465066420528000
 
-        _ = self.query_source(source_id=source_id, gaia_release="DR3")
+        _ = self.query_source(source_id=self.source_id, gaia_release="DR3")
 
         self.print_section("Gaia BH3 epoch data")
 
@@ -938,7 +951,7 @@ class EpochAstrometry(ExoGaia):
 
         print(f"Gaia release: {self.gaia_release}")
         print(f"Reference epoch: {self.ref_epoch}")
-        print(f"Source ID: {source_id}")
+        print(f"Source ID: {self.source_id}")
 
         if self.primary_mass is None:
             self.primary_mass = (0.76, 0.05)  # (Msun)

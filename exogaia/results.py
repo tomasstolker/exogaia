@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 from scipy.stats import norm
 
 from exogaia.core import ExoGaia
-from exogaia.models import BinaryModel
+from exogaia.models import KeplerModel
 
 
 class FitResults(ExoGaia):
@@ -364,8 +364,8 @@ class FitResults(ExoGaia):
         max_idx = np.argmax(self.ln_like)
         best_params = self.samples[max_idx, :]
 
-        binary_model = BinaryModel(epoch_astrometry=self.epoch_astrometry)
-        best_model = binary_model.calc_model(best_params)
+        kepler_model = KeplerModel(epoch_astrometry=self.epoch_astrometry)
+        best_model = kepler_model.calc_model(best_params)
 
         fig = plt.figure(figsize=(6, 3))
 
@@ -422,16 +422,19 @@ class FitResults(ExoGaia):
         best_params = self.samples[max_idx, :]
 
         period = np.sqrt(best_params[5] ** 3 / best_params[11]) * 365.25
-        rel_time_day = np.linspace(0.0, period, 1000)
+        # TODO
+        obs_time = np.linspace(0.0, period, 1000)
 
-        bin_model = BinaryModel(epoch_astrometry=self.epoch_astrometry, verbose=False)
-
-        delta_ra_full, delta_dec_full = bin_model.calc_orbit(
-            best_params, rel_time_day=rel_time_day
+        kepler_model = KeplerModel(
+            epoch_astrometry=self.epoch_astrometry, verbose=False
         )
 
-        delta_ra, delta_dec = bin_model.calc_orbit(best_params, rel_time_day=None)
-        residuals = bin_model.calc_residuals(best_params)
+        delta_ra_full, delta_dec_full = kepler_model.calc_orbit(
+            best_params, obs_time=obs_time
+        )
+
+        delta_ra, delta_dec = kepler_model.calc_orbit(best_params, obs_time=None)
+        residuals = kepler_model.calc_residuals(best_params)
 
         self.print_section("Plot orbit")
 

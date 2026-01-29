@@ -16,7 +16,10 @@ Below you can find tutorials that highlight the functionalities of ``exogaia``. 
   – Fit the epoch astrometry with an accelerating star model
 
 - :doc:`tutorials/binary_orbit`
-  – Fit the epoch astrometry with a orbit model
+  – Fit the epoch astrometry with an orbit model
+
+- :doc:`tutorials/gaia_bh3`
+  – Analyse the DR4 epoch astrometry of Gaia BH3
 
 - :doc:`tutorials/completeness`
   – Compute a DR4/DR5 completeness map for a Gaia source
@@ -28,4 +31,5 @@ Below you can find tutorials that highlight the functionalities of ``exogaia``. 
    tutorials/single_star.ipynb
    tutorials/acceleration.ipynb
    tutorials/binary_orbit.ipynb
+   tutorials/gaia_bh3.ipynb
    tutorials/completeness.ipynb

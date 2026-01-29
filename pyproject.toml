@@ -27,6 +27,7 @@ dependencies = [
     "kepler.py",
     "matplotlib",
     "numpy",
+    "nsstools",
     "pandas",
     "pooch",
     "pymultinest",
