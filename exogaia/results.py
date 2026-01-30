@@ -1,5 +1,5 @@
 """
-Module with the ``FitResults`` class.
+Module with the ``SamplingResults`` class.
 """
 
 import pickle
@@ -7,6 +7,7 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 
+from astropy import units as u
 from beartype import beartype, typing
 from corner import corner
 from matplotlib.figure import Figure
@@ -16,7 +17,7 @@ from exogaia.core import ExoGaia
 from exogaia.models import KeplerModel
 
 
-class FitResults(ExoGaia):
+class SamplingResults(ExoGaia):
     """
     Class for plotting fit results.
     """
@@ -33,7 +34,7 @@ class FitResults(ExoGaia):
             burnin of the MCMC sampling with ``emcee``. No burnin is
             removed if the argument is set to ``None``. This parameter
             has only an effect on the fit results from
-            :class:`~exogaia.sampler.MCMCSampler`.
+            :class:`~exogaia.samplers.MCMCSampler`.
 
         Returns
         -------
@@ -57,6 +58,7 @@ class FitResults(ExoGaia):
 
         self.data_table = pickle_data["data_table"]
         self.epoch_astrometry = pickle_data["epoch_astrometry"]
+        self.ref_epoch = self.epoch_astrometry.ref_epoch
 
         print(f"Number of parameters: {self.n_params}")
         print(f"Samples shape: {self.samples.shape}")
@@ -92,19 +94,21 @@ class FitResults(ExoGaia):
             )
 
         self.labels = [
-            r"$\Delta \alpha \cos\delta$ (mas)",
+            r"$\Delta \alpha$ (mas)",
             r"$\Delta \delta$ (mas)",
-            r"$\mu_\alpha \cos\delta$ (mas/yr)",
-            r"$\mu_\delta$ (mas/yr)",
             r"$\varpi$ (mas)",
-            r"$\log{a/\mathrm{au}}$",
+            r"$\mu_\alpha$ (mas/yr)",
+            r"$\mu_\delta$ (mas/yr)",
+            # r"$\log{a/\mathrm{au}}$",
+            r"$\log{P/\mathrm{days}}$",
             r"$e$",
+            r"$\tau$",
+            r"$\log{a_0/\mathrm{mas}}$",
             r"$i$ (deg)",
             r"$\omega$ (deg)",
             r"$\Omega$ (deg)",
-            r"$t_\mathrm{p}$",
-            r"$M_1$ ($M_\odot$)",
-            r"$\log{M_2/M_\odot}$",
+            # r"$M_1$ ($M_\odot$)",
+            # r"$\log{M_2/M_\odot}$",
         ]
 
     @beartype
@@ -143,7 +147,7 @@ class FitResults(ExoGaia):
         print(f"Number of walkers: {n_walkers}")
         print(f"Thin value: {thin}")
 
-        fig, axs = plt.subplots(13, 1, figsize=(5, 20))
+        fig, axs = plt.subplots(self.n_params, 1, figsize=(5, 20))
 
         if self.orig_samples.ndim == 4:
             samples_arr = np.swapaxes(self.orig_samples, 0, 1)
@@ -158,10 +162,10 @@ class FitResults(ExoGaia):
             for walk_idx in rand_walk:
                 walk_track = samples_arr[::thin, walk_idx, param_idx]
 
-                if param_idx in [5, 12]:
+                if param_idx in [5, 8]:
                     walk_track = np.log10(walk_track)
 
-                elif param_idx in [7, 8, 9]:
+                elif param_idx in [9, 10, 11]:
                     walk_track = np.degrees(walk_track)
 
                 axs[param_idx].plot(
@@ -221,22 +225,32 @@ class FitResults(ExoGaia):
 
         post_samples = np.copy(self.samples)
 
-        # Convert sma to log10(sma)
+        if truths is None:
+            truths_new = None
+        else:
+            truths_new = truths.copy()
+
+        # Convert per to log10(per)
         post_samples[:, 5] = np.log10(post_samples[:, 5])
         if truths is not None:
-            truths[5] = np.log10(truths[5])
+            truths_new[5] = np.log10(truths_new[5])
+
+        # Convert sma_0 to log10(sma_0)
+        post_samples[:, 8] = np.log10(post_samples[:, 8])
+        if truths is not None:
+            truths_new[8] = np.log10(truths_new[8])
 
         # Convert mass_2 to log10(mass_2)
-        post_samples[:, 12] = np.log10(post_samples[:, 12])
-        if truths is not None:
-            truths[12] = np.log10(truths[12])
+        # post_samples[:, 12] = np.log10(post_samples[:, 12])
+        # if truths is not None:
+        #     truths[12] = np.log10(truths[12])
 
         # Convert inc, aop, pan from rad to deg
-        post_samples[:, 7:10] = np.degrees(post_samples[:, 7:10])
+        post_samples[:, 9:] = np.degrees(post_samples[:, 9:])
         if truths is not None:
-            truths[7] = np.degrees(truths[7])
-            truths[8] = np.degrees(truths[8])
-            truths[9] = np.degrees(truths[9])
+            truths_new[9] = np.degrees(truths_new[9])
+            truths_new[10] = np.degrees(truths_new[10])
+            truths_new[11] = np.degrees(truths_new[11])
 
         # Quantiles for the 1D distributions (-1, 1 sigma)
         quantiles = [norm.cdf(n_sigma) for n_sigma in [-1, 1]]
@@ -252,19 +266,21 @@ class FitResults(ExoGaia):
         range_select = np.full(self.n_params, 0.99)
 
         params = [
-            r"$\Delta \alpha \cos\delta$",
+            r"$\Delta \alpha$",
             r"$\Delta \delta$",
             r"$\varpi$",
-            r"$\mu_\alpha \cos\delta$",
+            r"$\mu_\alpha$",
             r"$\mu_\delta$",
-            # r"$a$",
-            r"$\log{a/\mathrm{au}}$",
+            # r"$\log{a/\mathrm{au}}$",
+            r"$\log{P/\mathrm{days}}$",
             r"$e$",
+            r"$\tau$",
+            r"$\log{a_0/\mathrm{mas}}$",
             r"$i$",
             r"$\omega$",
             r"$\Omega$",
-            r"$t_\mathrm{p}$",
-            r"$M_1$",
+            # r"$t_\mathrm{p}$",
+            # r"$M_1$",
             # r"$M_2$",
             r"$\log{M_2/M_\odot}$",
         ]
@@ -275,14 +291,14 @@ class FitResults(ExoGaia):
             "(mas)",
             "(mas/yr)",
             "(mas/yr)",
-            "(au)",
+            None,
+            None,
+            None,
             None,
             "(deg)",
             "(deg)",
             "(deg)",
-            "(days)",
-            r"($M_\odot$)",
-            r"($M_\odot$)",
+            # r"($M_\odot$)",
         ]
 
         titles = []
@@ -305,7 +321,7 @@ class FitResults(ExoGaia):
 
         fig = corner(
             post_samples,
-            truths=truths,
+            truths=truths_new,
             truth_color="cornflowerblue",
             labels=self.labels,
             titles=titles,
@@ -356,7 +372,7 @@ class FitResults(ExoGaia):
         self.print_section("Plot residuals")
 
         # Epoch astrometry data
-        obs_yr = self.data_table["relative_time_year"].to_numpy()
+        obs_time = self.data_table["obs_time_tcb"].to_numpy()
         obs_pos = self.data_table["centroid_pos_al"].to_numpy()
         obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
 
@@ -365,13 +381,28 @@ class FitResults(ExoGaia):
         best_params = self.samples[max_idx, :]
 
         kepler_model = KeplerModel(epoch_astrometry=self.epoch_astrometry)
-        best_model = kepler_model.calc_model(best_params)
+        best_model = kepler_model.calc_1d_model(best_params)
+
+        residuals = obs_pos - best_model
+
+        # Number of degrees of freedom
+        n_dof = len(obs_pos) - len(best_params)
+
+        # Reduced chi^2
+        chi2_red = np.sum(residuals**2 / obs_err**2) / n_dof
+
+        # RUWE
+        if self.epoch_astrometry.sim_data:
+            ruwe = np.sqrt(chi2_red)
+        else:
+            ruwe = np.sqrt(chi2_red) / self.epoch_astrometry.u0_norm
 
         fig = plt.figure(figsize=(6, 3))
+        ax = plt.gca()
 
         plt.errorbar(
-            obs_yr,
-            obs_pos - best_model,
+            obs_time,
+            residuals,
             yerr=obs_err,
             ls="none",
             marker="s",
@@ -381,6 +412,47 @@ class FitResults(ExoGaia):
             color="tab:purple",
             ecolor="black",
             mec="black",
+            zorder=2,
+        )
+
+        plt.errorbar(
+            obs_time[0],
+            residuals[0],
+            yerr=obs_err[0],
+            ls="none",
+            marker="s",
+            ms=5.0,
+            mew=1.2,
+            elinewidth=1.2,
+            color="tab:green",
+            ecolor="black",
+            mec="black",
+            zorder=3,
+        )
+
+        plt.errorbar(
+            obs_time[-1],
+            residuals[-1],
+            yerr=obs_err[-1],
+            ls="none",
+            marker="s",
+            ms=5.0,
+            mew=1.2,
+            elinewidth=1.2,
+            color="tab:red",
+            ecolor="black",
+            mec="black",
+            zorder=3,
+        )
+
+        plt.text(
+            0.04,
+            0.92,
+            f"RUWE = {ruwe:.3f}",
+            ha="left",
+            va="center",
+            transform=ax.transAxes,
+            fontsize=12,
         )
 
         plt.xlabel("Time (yr)")
@@ -421,16 +493,21 @@ class FitResults(ExoGaia):
         max_idx = np.argmax(self.ln_like)
         best_params = self.samples[max_idx, :]
 
-        period = np.sqrt(best_params[5] ** 3 / best_params[11]) * 365.25
-        # TODO
-        obs_time = np.linspace(0.0, period, 1000)
+        # period = np.sqrt(best_params[5] ** 3 / best_params[11]) * 365.25
+        # obs_time = np.linspace(0.0, period, 1000)
+
+        yr_start = self.ref_epoch
+        yr_end = self.ref_epoch + (best_params[5] / 365.25) * u.yr
+
+        obs_time_full = np.linspace(yr_start, yr_end, 1000)
+        obs_time_full = obs_time_full.tcb.jyear
 
         kepler_model = KeplerModel(
             epoch_astrometry=self.epoch_astrometry, verbose=False
         )
 
         delta_ra_full, delta_dec_full = kepler_model.calc_orbit(
-            best_params, obs_time=obs_time
+            best_params, obs_time=obs_time_full
         )
 
         delta_ra, delta_dec = kepler_model.calc_orbit(best_params, obs_time=None)
@@ -442,8 +519,8 @@ class FitResults(ExoGaia):
         ax = plt.gca()
 
         plt.plot(
-            1e3 * delta_ra_full,
-            1e3 * delta_dec_full,
+            delta_ra_full,
+            delta_dec_full,
             ls="-",
             lw=1.5,
             marker="none",
@@ -469,8 +546,8 @@ class FitResults(ExoGaia):
             y2 = delta_dec[i] + cos_scan_ang[i] * (res_item - obs_err[i])
 
             plt.plot(
-                [1e3 * x1, 1e3 * x2],
-                [1e3 * y1, 1e3 * y2],
+                [x1, x2],
+                [y1, y2],
                 "-",
                 lw=1,
                 color=color,
@@ -478,8 +555,8 @@ class FitResults(ExoGaia):
             )
 
             plt.plot(
-                1e3 * delta_ra[i] + 1e3 * sin_scan_ang[i] * res_item,
-                1e3 * delta_dec[i] + 1e3 * cos_scan_ang[i] * res_item,
+                delta_ra[i] + sin_scan_ang[i] * res_item,
+                delta_dec[i] + cos_scan_ang[i] * res_item,
                 ls="none",
                 marker="s",
                 ms=5.0,
@@ -489,8 +566,8 @@ class FitResults(ExoGaia):
                 zorder=zorder,
             )
 
-        plt.xlabel(r"$\Delta$RA ($\mu$as)")
-        plt.ylabel(r"$\Delta$Dec ($\mu$as)")
+        plt.xlabel(r"$\Delta$RA (mas)")
+        plt.ylabel(r"$\Delta$Dec (mas)")
 
         x_lim = ax.get_xlim()
         y_lim = ax.get_ylim()

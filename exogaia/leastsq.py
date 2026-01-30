@@ -1445,10 +1445,10 @@ class LeastSquares(ExoGaia):
         logp_list = np.linspace(np.log10(1e2), np.log10(1e5), n_points)
 
         # Grid for the eccentricity
-        ecc_list = np.linspace(0.0, 1.0, n_points, endpoint=False)
+        ecc_list = np.linspace(1e-6, 1.0 - 1e-6, n_points, endpoint=False)
 
         # Grid for the relative time of periastron
-        tau_list = np.linspace(0.0, 0.1, n_points, endpoint=False)
+        tau_list = np.linspace(1e-6, 1.0 - 1e-6, n_points, endpoint=False)
 
         kepler_model = KeplerModel(
             epoch_astrometry=self.epoch_astrometry, verbose=False
@@ -1503,6 +1503,7 @@ class LeastSquares(ExoGaia):
                         global_param = np.hstack(
                             [best_param, period, ecc_item, tau_item]
                         )
+                        # The P, e, and tau covariances are not included
                         global_cov = param_cov
 
                     # x_sky = best_param[0] * x_orb + best_param[1] * y_orb
@@ -1780,20 +1781,23 @@ class LeastSquares(ExoGaia):
 
         self.best_param = np.hstack(
             [
-                global_param[:5],
-                global_param[9],
-                global_param[10],
-                global_param[11],
-                sma_0,
-                np.radians(df_campbell["inclination"][0]),
-                np.radians(df_campbell["arg_periastron"][0]),
-                np.radians(df_campbell["nodeangle"][0]),
+                global_param[:5],  # [delta_RA, delta_dec, par, mu_RA, mu_Dec]
+                global_param[9],  # per (days)
+                global_param[10],  # ecc
+                global_param[11],  # tau
+                sma_0,  # a_0 (mas)
+                np.radians(df_campbell["inclination"][0]),  # inc (rad)
+                np.radians(df_campbell["arg_periastron"][0]),  # aop (rad)
+                np.radians(df_campbell["nodeangle"][0]),  # pan (rad)
             ]
         )
 
         self.best_model = global_model
-        self.param_cov = global_cov
         self.ruwe = global_ruwe
+
+        # Do not store because the P, e, and tau
+        # covariances are not included
+        # self.param_cov = global_cov
 
         return fig
 
@@ -1869,7 +1873,7 @@ class LeastSquares(ExoGaia):
                 -1000.0,  # (mas/yr)
                 -1000.0,  # (mas/yr)
                 10.0,  # (days)
-                1e-3,
+                0.0,
                 0.0,
                 0.0,
                 0.0,
@@ -1886,7 +1890,7 @@ class LeastSquares(ExoGaia):
                 1000.0,  # (mas/yr)
                 1000.0,  # (mas/yr)
                 1e5,  # (days)
-                1.0 - 1e-3,
+                0.99999,
                 1.0,
                 1e4,
                 np.pi,

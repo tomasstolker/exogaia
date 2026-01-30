@@ -60,10 +60,10 @@ exogaia.results module
    :show-inheritance:
    :undoc-members:
 
-exogaia.sampler module
-----------------------
+exogaia.samplers module
+-----------------------
 
-.. automodule:: exogaia.sampler
+.. automodule:: exogaia.samplers
    :members:
    :show-inheritance:
    :undoc-members:

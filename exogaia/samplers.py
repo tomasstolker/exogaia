@@ -20,7 +20,6 @@ from exogaia.data import EpochAstrometry
 from exogaia.leastsq import LeastSquares
 from exogaia.models import KeplerModel
 from exogaia.priors import (
-    FixedPrior,
     LogUniformPrior,
     NormalPrior,
     SinPrior,
@@ -34,12 +33,19 @@ class NestedSampler(ExoGaia):
     """
 
     @beartype
-    def __init__(self, epoch_astrometry: EpochAstrometry) -> None:
+    def __init__(
+        self, epoch_astrometry: EpochAstrometry, least_squares: LeastSquares
+    ) -> None:
         """
         Parameters
         ----------
         epoch_astrometry : EpochAstrometry
             ``EpochAstrometry`` object that contains the data.
+        least_squares : LeastSquares
+            ``LeastSquares`` object after running
+            ``:func:`~exogaia.leastsq.LeastSquares.orbit_fit```
+            such that the ``best_param`` attribute contains
+            the best-fit parameters from the least-squares fit.
 
         Returns
         -------
@@ -52,6 +58,7 @@ class NestedSampler(ExoGaia):
         self.epoch_astrometry = epoch_astrometry
         self.data_table = epoch_astrometry.data_table
         self.primary_mass = epoch_astrometry.primary_mass
+        self.least_squares = least_squares
 
         self.output_folder = None
         self.ln_z = None
@@ -64,8 +71,24 @@ class NestedSampler(ExoGaia):
             epoch_astrometry=self.epoch_astrometry, verbose=False
         )
 
+        # Parameter index numbers
+        self.param_indices = {
+            "ra_offset": 0,
+            "dec_offset": 1,
+            "parallax": 2,
+            "pmra": 3,
+            "pmdec": 4,
+            "per": 5,
+            "ecc": 6,
+            "tau": 7,
+            "sma_0": 8,
+            "inc": 9,
+            "aop": 10,
+            "pan": 11,
+        }
+
         # Number of model parameters
-        self.n_params = 5 + 8
+        self.n_params = len(self.param_indices)
 
     @beartype
     def set_priors(self) -> None:
@@ -78,37 +101,72 @@ class NestedSampler(ExoGaia):
             None
         """
 
-        # Set default priors
+        self.priors["ra_offset"] = NormalPrior(self.least_squares.best_param[0], 0.1)
+        self.priors["dec_offset"] = NormalPrior(self.least_squares.best_param[1], 0.1)
 
-        least_sq = LeastSquares(epoch_astrometry=self.epoch_astrometry)
+        self.priors["parallax"] = NormalPrior(
+            self.least_squares.best_param[2], 0.1, truncate_zero=True
+        )
 
-        least_sq.singl_5param(plot_file=None, verbose=True)
+        self.priors["pmra"] = NormalPrior(self.least_squares.best_param[3], 0.1)
+        self.priors["pmdec"] = NormalPrior(self.least_squares.best_param[4], 0.1)
 
-        if least_sq.ruwe > 1.1:
-            least_sq.accel_7param(plot_file=None, verbose=True)
+        if (
+            len(self.least_squares.best_param) == 12
+            and self.least_squares.param_cov is not None
+        ):
+            param_sig = np.sqrt(np.diag(self.least_squares.param_cov))
 
-        if least_sq.ruwe > 1.1:
-            least_sq.accel_9param(plot_file=None, verbose=True)
+            self.priors["per"] = NormalPrior(
+                self.least_squares.best_param[5], param_sig[5], truncate_zero=True
+            )
+            self.priors["ecc"] = NormalPrior(
+                self.least_squares.best_param[6],
+                param_sig[6],
+                truncate_zero=True,
+                truncate_upper=1.0,
+            )
+            self.priors["tau"] = NormalPrior(
+                self.least_squares.best_param[7],
+                param_sig[7],
+                truncate_zero=True,
+                truncate_upper=1.0,
+            )
+            self.priors["sma_0"] = NormalPrior(
+                self.least_squares.best_param[8], param_sig[8], truncate_zero=True
+            )
+            self.priors["inc"] = NormalPrior(
+                self.least_squares.best_param[9],
+                param_sig[9],
+                truncate_zero=True,
+                truncate_upper=np.pi,
+            )
+            self.priors["aop"] = NormalPrior(
+                self.least_squares.best_param[10],
+                param_sig[10],
+                truncate_zero=True,
+                truncate_upper=2.0 * np.pi,
+            )
+            self.priors["pan"] = NormalPrior(
+                self.least_squares.best_param[11],
+                param_sig[11],
+                truncate_zero=True,
+                truncate_upper=2.0 * np.pi,
+            )
 
-        if least_sq.ruwe > 1.1:
-            least_sq.orbit_grid(plot_file=None, n_points=30)
-
-        self.priors["ra_offset"] = NormalPrior(least_sq.best_param[0], 0.1)
-        self.priors["dec_offset"] = NormalPrior(least_sq.best_param[1], 0.1)
-        self.priors["parallax"] = NormalPrior(least_sq.best_param[2], 0.1)
-        self.priors["pmra"] = NormalPrior(least_sq.best_param[3], 0.1)
-        self.priors["pmdec"] = NormalPrior(least_sq.best_param[4], 0.1)
-        self.priors["period"] = LogUniformPrior(1e1, 1e5)
-        self.priors["ecc"] = UniformPrior(0.0, 1.0)
-        self.priors["tau"] = UniformPrior(0.0, 1.0)
-        self.priors["sma_0"] = LogUniformPrior(1e-3, 100.0)
-        self.priors["inc"] = SinPrior()
-        self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
-        self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
-        # self.priors["mass_1"] = NormalPrior(
-        #     self.primary_mass[0], self.primary_mass[1], truncate_zero=True
-        # )
-        # self.priors["mass_2"] = LogUniformPrior(1e-3, 1.0)
+        else:
+            self.priors["per"] = LogUniformPrior(1e1, 1e5)
+            self.priors["ecc"] = UniformPrior(0.0, 1.0)
+            self.priors["tau"] = UniformPrior(0.0, 1.0)
+            self.priors["sma_0"] = LogUniformPrior(1e-3, 100.0)
+            self.priors["inc"] = SinPrior()
+            self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
+            self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
+            # self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
+            # self.priors["mass_1"] = NormalPrior(
+            #     self.primary_mass[0], self.primary_mass[1], truncate_zero=True
+            # )
+            # self.priors["mass_2"] = UniformPrior(0.0, 1.0)
 
     @beartype
     def prior_transform(self, cube):
@@ -131,71 +189,71 @@ class NestedSampler(ExoGaia):
         # relative to the Gaia coordinates of the
         # source at the reference epoch (mas)
         # Default: uniform [-10, 10]
-        cube[0] = self.priors["ra_offset"].draw_samples(1)
-        cube[1] = self.priors["dec_offset"].draw_samples(1)
+        cube[0] = self.priors["ra_offset"].draw_samples(1)[0]
+        cube[1] = self.priors["dec_offset"].draw_samples(1)[0]
 
         # Parallax (mas)
         # Default: uniform [0, 100]
-        cube[2] = self.priors["parallax"].draw_samples(1)
+        cube[2] = self.priors["parallax"].draw_samples(1)[0]
 
         # Proper motion (mas/yr)
         # Default: uniform [-50, 50]
-        cube[3] = self.priors["pmra"].draw_samples(1)
-        cube[4] = self.priors["pmdec"].draw_samples(1)
+        cube[3] = self.priors["pmra"].draw_samples(1)[0]
+        cube[4] = self.priors["pmdec"].draw_samples(1)[0]
 
         # Period (days)
         # Default: log-uniform [log10(1e1), log10(5)]
-        cube[5] = self.priors["period"].draw_samples(1)
+        cube[5] = self.priors["per"].draw_samples(1)[0]
 
         # Eccentricity
         # Default: uniform [0, 1]
-        cube[6] = self.priors["ecc"].draw_samples(1)
+        cube[6] = self.priors["ecc"].draw_samples(1)[0]
 
         # Epoch of periastron
         # Default: uniform [0, 1]
-        cube[7] = self.priors["tau"].draw_samples(1)
+        cube[7] = self.priors["tau"].draw_samples(1)[0]
 
         # Semi-major axis of photocenter (mas)
         # Default: log-uniform [log10(1e-3), log10(2)]
-        cube[8] = self.priors["sma_0"].draw_samples(1)
+        cube[8] = self.priors["sma_0"].draw_samples(1)[0]
 
         # Inclination (rad)
         # Default: isotropic -> i = arccos(1 - 2u)
-        cube[9] = self.priors["inc"].draw_samples(1)
+        cube[9] = self.priors["inc"].draw_samples(1)[0]
 
         # Argument of periastron (rad)
         # Default: uniform [0, 2π]
-        cube[10] = self.priors["aop"].draw_samples(1)
+        cube[10] = self.priors["aop"].draw_samples(1)[0]
 
         # Position angle of ascending node (rad)
         # Default: uniform [0, 2π]
-        cube[11] = self.priors["pan"].draw_samples(1)
+        cube[11] = self.priors["pan"].draw_samples(1)[0]
 
-        # Primary mass (Msun)
-        # Default: normal(primary_mass[0], primary_mass[1])
-        cube[12] = self.priors["mass_1"].draw_samples(1)
-
-        # Secondary mass (Msun)
-        if isinstance(self.priors["mass_2"], FixedPrior):
-            cube[12] = self.priors["mass_2"].fix_val
-        else:
-            # Default: uniform [min_m2, m1] with mass_2 < mass_1
-            if isinstance(self.priors["mass_2"], UniformPrior):
-                m2_prior = UniformPrior(self.priors["mass_2"].min_val, cube[11])
-                cube[12] = m2_prior.draw_samples(1)
-
-            else:
-                m2_sample = np.inf
-                m2_prior = NormalPrior(
-                    self.priors["mass_2"].mu,
-                    self.priors["mass_2"].sigma,
-                    truncate_zero=True,
-                )
-
-                while m2_sample > cube[11]:
-                    m2_sample = m2_prior.draw_samples(1)
-
-                cube[12] = m2_sample
+        # # Primary mass (Msun)
+        # # Default: normal(primary_mass[0], primary_mass[1])
+        # cube[12] = self.priors["mass_1"].draw_samples(1)[0]
+        #
+        # # Secondary mass (Msun)
+        # if isinstance(self.priors["mass_2"], FixedPrior):
+        #     cube[12] = self.priors["mass_2"].fix_val
+        # else:
+        #     # Default: uniform [min_m2, m1] with mass_2 < mass_1
+        #     if isinstance(self.priors["mass_2"], UniformPrior):
+        #         m2_prior = UniformPrior(self.priors["mass_2"].min_val, cube[11])
+        #         cube[12] = m2_prior.draw_samples(1)[0]
+        #
+        #     else:
+        #         m2_sample = np.inf
+        #         m2_prior = NormalPrior(
+        #             self.priors["mass_2"].mu,
+        #             self.priors["mass_2"].sigma,
+        #             truncate_zero=True,
+        #         )
+        #
+        #         while m2_sample > cube[11]:
+        #             m2_sample = m2_prior.draw_samples(1)[0]
+        #
+        #         cube[12] = m2_sample
 
         return cube
 
@@ -793,12 +851,19 @@ class MCMCSampler(ExoGaia):
     """
 
     @beartype
-    def __init__(self, epoch_astrometry: EpochAstrometry) -> None:
+    def __init__(
+        self, epoch_astrometry: EpochAstrometry, least_squares: LeastSquares
+    ) -> None:
         """
         Parameters
         ----------
         epoch_astrometry : EpochAstrometry
             ``EpochAstrometry`` object that contains the data.
+        least_squares : LeastSquares
+            ``LeastSquares`` object after running
+            ``:func:`~exogaia.leastsq.LeastSquares.orbit_fit```
+            such that the ``best_param`` attribute contains
+            the best-fit parameters from the least-squares fit.
 
         Returns
         -------
@@ -811,6 +876,7 @@ class MCMCSampler(ExoGaia):
         self.epoch_astrometry = epoch_astrometry
         self.data_table = epoch_astrometry.data_table
         self.primary_mass = epoch_astrometry.primary_mass
+        self.least_squares = least_squares
 
         self.output_folder = None
 
@@ -821,9 +887,6 @@ class MCMCSampler(ExoGaia):
             epoch_astrometry=self.epoch_astrometry, verbose=False
         )
 
-        # Number of model parameters
-        self.n_params = 5 + 8
-
         # Parameter index numbers
         self.param_indices = {
             "ra_offset": 0,
@@ -831,15 +894,17 @@ class MCMCSampler(ExoGaia):
             "parallax": 2,
             "pmra": 3,
             "pmdec": 4,
-            "sma": 5,
+            "per": 5,
             "ecc": 6,
-            "inc": 7,
-            "aop": 8,
-            "pan": 9,
-            "tau": 10,
-            "mass_1": 11,
-            "mass_2": 12,
+            "tau": 7,
+            "sma_0": 8,
+            "inc": 9,
+            "aop": 10,
+            "pan": 11,
         }
+
+        # Number of model parameters
+        self.n_params = len(self.param_indices)
 
     @beartype
     def set_priors(self) -> None:
@@ -852,36 +917,72 @@ class MCMCSampler(ExoGaia):
             None
         """
 
-        # Set default priors
+        self.priors["ra_offset"] = NormalPrior(self.least_squares.best_param[0], 0.1)
+        self.priors["dec_offset"] = NormalPrior(self.least_squares.best_param[1], 0.1)
 
-        least_sq = LeastSquares(epoch_astrometry=self.epoch_astrometry)
-
-        least_sq.singl_5param(plot_file=None, verbose=True)
-
-        if least_sq.ruwe > 1.1:
-            least_sq.accel_7param(plot_file=None, verbose=True)
-
-        if least_sq.ruwe > 1.1:
-            least_sq.accel_9param(plot_file=None, verbose=True)
-
-        if least_sq.ruwe > 1.1:
-            least_sq.orbit_grid(plot_file=None, n_points=30)
-
-        self.priors["ra_offset"] = NormalPrior(least_sq.best_param[0], 0.1)
-        self.priors["dec_offset"] = NormalPrior(least_sq.best_param[1], 0.1)
-        self.priors["parallax"] = NormalPrior(least_sq.best_param[2], 0.1)
-        self.priors["pmra"] = NormalPrior(least_sq.best_param[3], 0.1)
-        self.priors["pmdec"] = NormalPrior(least_sq.best_param[4], 0.1)
-        self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
-        self.priors["ecc"] = UniformPrior(0.0, 1.0)
-        self.priors["inc"] = SinPrior()
-        self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
-        self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
-        self.priors["tau"] = UniformPrior(0.0, 1.0)
-        self.priors["mass_1"] = NormalPrior(
-            self.primary_mass[0], self.primary_mass[1], truncate_zero=True
+        self.priors["parallax"] = NormalPrior(
+            self.least_squares.best_param[2], 0.1, truncate_zero=True
         )
-        self.priors["mass_2"] = UniformPrior(0.0, 1.0)
+
+        self.priors["pmra"] = NormalPrior(self.least_squares.best_param[3], 0.1)
+        self.priors["pmdec"] = NormalPrior(self.least_squares.best_param[4], 0.1)
+
+        if (
+            len(self.least_squares.best_param) == 12
+            and self.least_squares.param_cov is not None
+        ):
+            param_sig = np.sqrt(np.diag(self.least_squares.param_cov))
+
+            self.priors["per"] = NormalPrior(
+                self.least_squares.best_param[5], param_sig[5], truncate_zero=True
+            )
+            self.priors["ecc"] = NormalPrior(
+                self.least_squares.best_param[6],
+                param_sig[6],
+                truncate_zero=True,
+                truncate_upper=1.0,
+            )
+            self.priors["tau"] = NormalPrior(
+                self.least_squares.best_param[7],
+                param_sig[7],
+                truncate_zero=True,
+                truncate_upper=1.0,
+            )
+            self.priors["sma_0"] = NormalPrior(
+                self.least_squares.best_param[8], param_sig[8], truncate_zero=True
+            )
+            self.priors["inc"] = NormalPrior(
+                self.least_squares.best_param[9],
+                param_sig[9],
+                truncate_zero=True,
+                truncate_upper=np.pi,
+            )
+            self.priors["aop"] = NormalPrior(
+                self.least_squares.best_param[10],
+                param_sig[10],
+                truncate_zero=True,
+                truncate_upper=2.0 * np.pi,
+            )
+            self.priors["pan"] = NormalPrior(
+                self.least_squares.best_param[11],
+                param_sig[11],
+                truncate_zero=True,
+                truncate_upper=2.0 * np.pi,
+            )
+
+        else:
+            self.priors["per"] = LogUniformPrior(1e1, 1e5)
+            self.priors["ecc"] = UniformPrior(0.0, 1.0)
+            self.priors["tau"] = UniformPrior(0.0, 1.0)
+            self.priors["sma_0"] = LogUniformPrior(1e-3, 100.0)
+            self.priors["inc"] = SinPrior()
+            self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
+            self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
+            # self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
+            # self.priors["mass_1"] = NormalPrior(
+            #     self.primary_mass[0], self.primary_mass[1], truncate_zero=True
+            # )
+            # self.priors["mass_2"] = UniformPrior(0.0, 1.0)
 
     @beartype
     def log_prior(self, params: np.ndarray) -> float:
@@ -922,7 +1023,10 @@ class MCMCSampler(ExoGaia):
                 if self.priors[param_item].truncate_zero and params[param_idx] < 0.0:
                     log_prior += -np.inf
 
-                elif self.priors[param_item].truncate_one and params[param_idx] > 1.0:
+                elif (
+                    self.priors[param_item].truncate_upper is not None
+                    and params[param_idx] > self.priors[param_item].truncate_upper
+                ):
                     log_prior += -np.inf
 
                 else:
@@ -965,7 +1069,7 @@ class MCMCSampler(ExoGaia):
             Log-likelihood of the model evaluation.
         """
 
-        delta_eta = self.kepler_model.calc_model(params)
+        delta_eta = self.kepler_model.calc_1d_model(params)
 
         if np.any(np.isnan(delta_eta)):
             print("NAN", params)

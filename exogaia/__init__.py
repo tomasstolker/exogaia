@@ -20,8 +20,8 @@ from exogaia.priors import (
     SinPrior,
     UniformPrior,
 )
-from exogaia.results import FitResults
-from exogaia.sampler import MCMCSampler, NestedSampler
+from exogaia.results import SamplingResults
+from exogaia.samplers import MCMCSampler, NestedSampler
 
 from ._version import __version__, __version_tuple__
 

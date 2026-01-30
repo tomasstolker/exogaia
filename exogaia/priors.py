@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from beartype import beartype
+from beartype import beartype, typing
 from scipy.stats import norm, truncnorm
 
 
@@ -195,7 +195,7 @@ class NormalPrior(Prior):
         mu: float,
         sigma: float,
         truncate_zero: bool = False,
-        truncate_one: bool = False,
+        truncate_upper: typing.Optional[float] = None,
     ) -> None:
         """
         Parameters
@@ -206,8 +206,13 @@ class NormalPrior(Prior):
             Standard deviation of the normal distribution.
         truncate_zero : bool
             Truncate the normal distribution at zero.
-        truncate_one : bool
-            Truncate the normal distribution at one.
+        truncate_upper : float, None
+            Truncate the normal distribution at the upper
+            end of the distribution at the value of
+            ``truncate_upper``. Only applied when the
+            argument of ``truncate_zero`` is set to
+            ``True``. The upper truncation is not applied
+            if the argument is set to ``None``.
 
         Returns
         -------
@@ -218,7 +223,7 @@ class NormalPrior(Prior):
         self.mu = mu
         self.sigma = sigma
         self.truncate_zero = truncate_zero
-        self.truncate_one = truncate_one
+        self.truncate_upper = truncate_upper
         self.rng = np.random.default_rng()
 
     @beartype
@@ -271,11 +276,10 @@ class NormalPrior(Prior):
         """
 
         if self.truncate_zero:
-            if self.truncate_one:
-                lower_bound, upper_bound = 0.0, 1.0
-
-            else:
+            if self.truncate_upper is None:
                 lower_bound, upper_bound = 0.0, np.inf
+            else:
+                lower_bound, upper_bound = 0.0, self.truncate_upper
 
             a = (lower_bound - self.mu) / self.sigma
             b = (upper_bound - self.mu) / self.sigma
