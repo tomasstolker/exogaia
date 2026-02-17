@@ -24,6 +24,7 @@ from tqdm.auto import tqdm
 from exogaia.core import ExoGaia
 from exogaia.data import EpochAstrometry
 from exogaia.models import KeplerModel, StarModel
+from exogaia.utils import orbit_sky
 
 
 class LeastSquares(ExoGaia):
@@ -2269,6 +2270,57 @@ class LeastSquares(ExoGaia):
                 zorder=3,
             )
 
+            axs[1].plot(
+                0.0,
+                0.0,
+                marker="x",
+                ms=5.0,
+                mew=1.5,
+                ls="none",
+                color="tab:gray",
+                mec="tab:gray",
+                zorder=3,
+                label="Barycenter",
+            )
+
+            # Time of periastron in Julian years
+            t_per = self.ref_epoch.value + (self.best_param[5] * self.best_param[7]) / 365.25
+
+            delta_ra_per, delta_dec_per = kepler_model.calc_orbit(
+                self.best_param, obs_time=np.array([t_per])
+            )
+
+            axs[1].plot(
+                delta_ra_per,
+                delta_dec_per,
+                marker="+",
+                ms=5.0,
+                mew=1.5,
+                ls="none",
+                color="tab:olive",
+                zorder=3,
+                label=rf"Periastron ($t_\mathrm{{per}} = {t_per:.2f}$)",
+            )
+
+            x_nodes, y_nodes = orbit_sky(
+                nu=np.array([self.best_param[10], np.pi + self.best_param[10]]),
+                sma=self.best_param[8],
+                ecc=self.best_param[6],
+                inc=self.best_param[9],
+                aop=self.best_param[10],
+                pan=self.best_param[11],
+            )
+
+            axs[1].plot(
+                x_nodes,
+                y_nodes,
+                ls=":",
+                lw=1,
+                marker="none",
+                color="tab:gray",
+                label="Line of nodes",
+            )
+
             axs[1].set_title(
                 rf"$P = {self.best_param[5]:.3f} \pm "
                 rf"{param_sig[5]:.3f}\ \mathrm{{days}}$" + "\n"
@@ -2289,6 +2341,7 @@ class LeastSquares(ExoGaia):
             axs[1].set_xlabel(r"$\Delta\alpha$ (mas)")
             axs[1].set_ylabel(r"$\Delta\delta$ (mas)")
             axs[1].invert_xaxis()
+            axs[1].legend(loc="best", frameon=False, fontsize=8)
 
             axs[2].errorbar(
                 obs_time[0],

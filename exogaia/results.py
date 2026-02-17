@@ -15,6 +15,7 @@ from scipy.stats import norm
 
 from exogaia.core import ExoGaia
 from exogaia.models import KeplerModel
+from exogaia.utils import orbit_sky
 
 
 class SamplingResults(ExoGaia):
@@ -566,6 +567,69 @@ class SamplingResults(ExoGaia):
                 zorder=zorder,
             )
 
+        plt.plot(
+            0.0,
+            0.0,
+            marker="x",
+            ms=5.0,
+            mew=1.5,
+            ls="none",
+            color="tab:gray",
+            mec="tab:gray",
+            zorder=3,
+        )
+
+        plt.plot(
+            0.0,
+            0.0,
+            marker="x",
+            ms=5.0,
+            mew=1.5,
+            ls="none",
+            color="tab:gray",
+            mec="tab:gray",
+            zorder=3,
+            label="Barycenter",
+        )
+
+        # Time of periastron in Julian years
+        t_per = self.ref_epoch.value + (best_params[5] * best_params[7]) / 365.25
+
+        delta_ra_per, delta_dec_per = kepler_model.calc_orbit(
+            best_params, obs_time=np.array([t_per])
+        )
+
+        plt.plot(
+            delta_ra_per,
+            delta_dec_per,
+            marker="+",
+            ms=5.0,
+            mew=1.5,
+            ls="none",
+            color="tab:olive",
+            zorder=3,
+            label=rf"Periastron ($t_\mathrm{{per}} = {t_per:.2f}$)",
+        )
+
+        x_nodes, y_nodes = orbit_sky(
+            nu=np.array([best_params[10], np.pi + best_params[10]]),
+            sma=best_params[8],
+            ecc=best_params[6],
+            inc=best_params[9],
+            aop=best_params[10],
+            pan=best_params[11],
+        )
+
+        plt.plot(
+            x_nodes,
+            y_nodes,
+            ls=":",
+            lw=1,
+            marker="none",
+            color="tab:gray",
+            label="Line of nodes",
+        )
+
         plt.xlabel(r"$\Delta$RA (mas)")
         plt.ylabel(r"$\Delta$Dec (mas)")
 
@@ -577,6 +641,8 @@ class SamplingResults(ExoGaia):
 
         plt.xlim(lim_max, -lim_max)
         plt.ylim(-lim_max, lim_max)
+
+        plt.legend(loc="best", frameon=False, fontsize=8)
 
         if plot_file is None:
             plt.show()

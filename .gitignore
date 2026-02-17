@@ -7,6 +7,8 @@ docs/tutorials/multinest/
 docs/tutorials/exogaia.pkl
 docs/tutorials/*.png
 docs/tutorials/*.csv
+tests/exogaia.pkl
+tests/plot.png
 build/
 dist/
 exogaia.egg-info/
@@ -15,3 +17,4 @@ coverage.xml
 .pytest_cache/
 htmlcov/
 .tox/
+

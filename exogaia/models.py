@@ -15,6 +15,7 @@ from beartype import beartype, typing
 from matplotlib.figure import Figure
 
 from exogaia.core import ExoGaia
+from exogaia.utils import orbit_sky
 
 
 class StarModel(ExoGaia):
@@ -155,6 +156,7 @@ class StarModel(ExoGaia):
 
         # Position of Gaia relative to the Solar System
         # barycenter at each observation time
+        # TODO See Wright & Howard (2009)
 
         gaia_pos = self.barycentric_position(obs_time)
         gaia_pos = gaia_pos.xyz.to_value()
@@ -755,12 +757,11 @@ class KeplerModel(ExoGaia):
         ----------
         model_param : list(float), np.ndarray
             List or array with the model parameters, in the following
-            order:  RA (deg), Dec (deg), parallax (mas), RA proper
-            motion (mas/yr), Dec proper motion (mas/yr), semi-major
-            axis (au), eccentricity, inclination (rad), argument of
-            periastron (rad), position angle of ascending node (rad),
-            relative time of periastron, primary mass (Msun),
-            secondary mass (Msun).
+            order:  RA offset (mas), Dec offset (mas), parallax (mas),
+            RA proper motion (mas/yr), Dec proper motion (mas/yr),
+            period (days), eccentricity, relative time of periastron,
+            semi-major axis (mas), inclination (rad), argument of
+            periastron (rad), position angle of ascending node (rad).
         plot_file : str, None
             File name for the output plot. The plot is shown
             instead of stored if the arguments is set to ``None``.
@@ -855,6 +856,57 @@ class KeplerModel(ExoGaia):
             zorder=3,
         )
 
+        plt.plot(
+            0.0,
+            0.0,
+            marker="x",
+            ms=5.0,
+            mew=1.5,
+            ls="none",
+            color="tab:gray",
+            mec="tab:gray",
+            zorder=3,
+            label="Barycenter",
+        )
+
+        # Time of periastron in Julian years
+        t_per = self.ref_epoch.value + (model_param[5] * model_param[7]) / 365.25
+
+        delta_ra_per, delta_dec_per = self.calc_orbit(
+            model_param, obs_time=np.array([t_per])
+        )
+
+        plt.plot(
+            delta_ra_per,
+            delta_dec_per,
+            marker="+",
+            ms=5.0,
+            mew=1.5,
+            ls="none",
+            color="tab:olive",
+            zorder=3,
+            label=rf"Periastron ($t_\mathrm{{per}} = {t_per:.2f}$)",
+        )
+
+        x_nodes, y_nodes = orbit_sky(
+            nu=np.array([model_param[10], np.pi + model_param[10]]),
+            sma=model_param[8],
+            ecc=model_param[6],
+            inc=model_param[9],
+            aop=model_param[10],
+            pan=model_param[11],
+        )
+
+        plt.plot(
+            x_nodes,
+            y_nodes,
+            ls=":",
+            lw=1,
+            marker="none",
+            color="tab:gray",
+            label="Line of nodes",
+        )
+
         plt.xlabel(r"$\Delta$RA (mas)")
         plt.ylabel(r"$\Delta$Dec (mas)")
 
@@ -866,6 +918,8 @@ class KeplerModel(ExoGaia):
 
         plt.xlim(lim_max, -lim_max)
         plt.ylim(-lim_max, lim_max)
+
+        plt.legend(loc="best", frameon=False, fontsize=8)
 
         if plot_file is None:
             plt.show()

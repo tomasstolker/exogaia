@@ -47,6 +47,8 @@ clean:
 	rm -f docs/tutorials/*.png
 	rm -f docs/tutorials/*.csv
 	rm -f docs/tutorials/exogaia.pkl
+	rm -f tests/exogaia.pkl
+	rm -f tests/plot.png
 	rm -rf build/
 	rm -rf dist/
 	rm -rf exogaia.egg-info/

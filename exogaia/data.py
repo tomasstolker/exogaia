@@ -596,12 +596,18 @@ class EpochAstrometry(ExoGaia):
         return model_param
 
     @beartype
-    def get_nss_tables(self) -> None:
+    def get_nss_tables(self, gaia_release = "DR3") -> None:
         """
         Method for downloading and storing the Gaia non-single star
         (NSS) tables. The output will be stored in `ECSV files
         <https://docs.astropy.org/en/stable/io/ascii/ecsv.html>`_.
         Currently, only ``gaia_release="DR3"`` is supported.
+
+        Parameters
+        ----------
+        gaia_release : str
+            Gaia release of which the NSS tables get downloaded.
+            Currently, the only possible argument is "DR3".
 
         Returns
         -------
@@ -611,7 +617,7 @@ class EpochAstrometry(ExoGaia):
 
         self.print_section("Retrieve Gaia non-single star tables")
 
-        if self.gaia_release in ["DR4", "DR5"]:
+        if gaia_release != "DR3":
             raise ValueError(
                 "The get_nss_table() only supports Gaia DR3. "
                 "Please set the 'gaia_release' argument to 'DR3'."
@@ -621,7 +627,7 @@ class EpochAstrometry(ExoGaia):
         # for table_item in Gaia.load_tables(only_names=True):
         #     print (table_item.get_qualified_name())
 
-        if self.gaia_release == "DR4":
+        if gaia_release == "DR3":
             # Gaia DR3 NSS tables
             gaia_tables = [
                 "gaiadr3.nss_acceleration_astro",
@@ -630,7 +636,7 @@ class EpochAstrometry(ExoGaia):
                 "gaiadr3.nss_vim_fl",
             ]
 
-        elif self.gaia_release == "DR4":
+        elif gaia_release == "DR4":
             # Gaia DR4 NSS tables
 
             gaia_tables = [
@@ -664,7 +670,7 @@ class EpochAstrometry(ExoGaia):
             gaia_result = gaia_job.get_results()
 
             gaia_result.write(
-                f"gaia{self.gaia_release}_{table_item}.ecsv",
+                f"gaia{gaia_release}_{table_item}.ecsv",
                 format="ascii.ecsv",
                 overwrite=True,
             )

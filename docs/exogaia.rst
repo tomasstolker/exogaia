@@ -68,6 +68,14 @@ exogaia.samplers module
    :show-inheritance:
    :undoc-members:
 
+exogaia.utils module
+--------------------
+
+.. automodule:: exogaia.utils
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 Module contents
 ---------------
 
