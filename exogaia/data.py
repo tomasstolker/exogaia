@@ -4,6 +4,7 @@ Module for Gaia epoch astrometry data.
 
 import warnings
 
+from numbers import Real
 from pathlib import Path
 
 import h5py
@@ -21,6 +22,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 from exogaia.core import ExoGaia
 from exogaia.models import KeplerModel, StarModel
+from exogaia.planets import OccurrenceRate
 
 Gaia.ROW_LIMIT = -1
 
@@ -34,7 +36,7 @@ class EpochAstrometry(ExoGaia):
     @beartype
     def __init__(
         self,
-        primary_mass: typing.Optional[typing.Tuple[float, float]] = None,
+        primary_mass: typing.Optional[typing.Tuple[Real, Real]] = None,
         gaia_release: str = "DR4",
     ) -> None:
         """
@@ -91,7 +93,8 @@ class EpochAstrometry(ExoGaia):
 
         if primary_mass is not None:
             print(
-                f"\nPrimary mass (Msun): {primary_mass[0]:.2f} +/- {primary_mass[1]:.2f}"
+                f"\nPrimary mass (Msun): {primary_mass[0]:.2f} "
+                f"+/- {primary_mass[1]:.2f}"
             )
 
     def __repr__(self):
@@ -150,57 +153,63 @@ class EpochAstrometry(ExoGaia):
     @beartype
     def simulate_data(
         self,
-        mass_1: typing.Optional[float] = None,
-        mass_2: typing.Optional[float] = None,
-        sma: typing.Optional[float] = None,
-        ecc: typing.Optional[float] = None,
-        inc: typing.Optional[float] = None,
-        aop: typing.Optional[float] = None,
-        pan: typing.Optional[float] = None,
-        tau: typing.Optional[float] = None,
-        sigma_per_ccd: typing.Optional[float] = None,
+        mass_2: typing.Optional[Real] = None,
+        sma: typing.Optional[Real] = None,
+        ecc: typing.Optional[Real] = None,
+        inc: typing.Optional[Real] = None,
+        aop: typing.Optional[Real] = None,
+        pan: typing.Optional[Real] = None,
+        tau: typing.Optional[Real] = None,
+        sigma_per_ccd: typing.Optional[Real] = None,
         csv_out: typing.Optional[str] = None,
-        ra: typing.Optional[float] = None,
-        dec: typing.Optional[float] = None,
-        parallax: typing.Optional[float] = None,
-        pmra: typing.Optional[float] = None,
-        pmdec: typing.Optional[float] = None,
-        phot_g_mean_mag: typing.Optional[float] = None,
-        reject_fraction: typing.Optional[float] = None,
-        occ_func: typing.Optional[typing.Callable] = None,
+        ra: typing.Optional[Real] = None,
+        dec: typing.Optional[Real] = None,
+        parallax: typing.Optional[Real] = None,
+        pmra: typing.Optional[Real] = None,
+        pmdec: typing.Optional[Real] = None,
+        phot_g_mean_mag: typing.Optional[Real] = None,
+        reject_fraction: typing.Optional[Real] = None,
+        occ_rate: typing.Union[typing.Optional[str], OccurrenceRate] = None,
         verbose: bool = True,
-    ) -> typing.List[float]:
+    ) -> typing.List[Real]:
         """
         Method to simulate the epoch astrometry for a
-        single star or binary system.
+        single star or binary system. The primary mass
+        from the ``primary_mass`` attribute is used.
 
         Parameters
         ----------
-        mass_1 : float, None
-            Primary mass (Msun). A single star is simulated by setting
-            the argument to ``None``.
         mass_2 : float, None
-            Secondary mass (Msun). A single star is simulated by setting
-            the argument to ``None``.
+            Companion mass (Mjup). A single star is simulated
+            by setting the argument of ``mass_2`` to ``None``.
         sma : float, None
-            Semi-major axis (au). This should be the relative semi-major
-            axi of the primary and secondary (i.e. a1+a2). A single star
-            is simulated by setting the argument to ``None``.
+            Semi-major axis (au). This should be the relative
+            semi-major axis of the primary and secondary,
+            so sma = a1+a2. A random value is drawn from a
+            log-uniform distribution between 0.1 and 30 au
+            if the argument is set to ``None``.
         ecc : float, None
-            Eccentricity. A single star is simulated by setting
-            the argument to ``None``.
+            Eccentricity. A random value is drawn from a beta
+            distribution as defined in Kipping 2013 if the
+            argument is set to ``None``.
         inc : float, None
-            Inclination (rad). A single star is simulated by setting
-            the argument to ``None``.
+            Inclination (rad). A random value is drawn from a
+            sin(theta) distribution, with theta between 0.0 and pi,
+            if the arguments is set to ``None``.
         aop : float, None
-            Argument of periastron (rad). A single star is simulated by
-            setting the argument to ``None``.
+            Argument of periastron (rad). A random value is drawn from
+            a uniform distribution between 0.0 and 2pi if the arguments
+            is set to ``None``.
         pan : float, None
-            Position angle of the ascending nodes (rad). A single star
-            is simulated by setting the argument to ``None``.
+            Position angle of the ascending node (rad). A random value
+            is drawn from a uniform distribution between 0.0 and 2pi
+            if the arguments is set to ``None``.
         tau : float, None
-            Periastron time, relative to the reference epoch
-            of ``gaia_release``. A single star is simulated by setting
+            Time of periastron as fraction of the orbital period,
+            relative to the reference epoch of ``gaia_release``.
+            A random value is drawn from a uniform distribution
+            between 0.0 and 1.0 if the arguments is set to
+            ``None``.
         sigma_per_ccd : float, None
             The AL uncertainty per CCD (mas). Setting the argument
             to ``None`` will adopt the G magnitude dependent
@@ -210,11 +219,13 @@ class EpochAstrometry(ExoGaia):
         ra : float, None
             RA coordinate (deg) at the reference epoch of the
             ``gaia_release``, relative to the RA at the
-            reference epoch.
+            reference epoch. Typically, this value can be
+            set to zero.,
         dec : float, None
             Dec coordinate (deg) at the reference epoch of the
             ``gaia_release``, relative to the Dec at the
-            reference epoch.
+            reference epoch. Typically, this value can be
+            set to zero.,
         parallax : float
             Parallax (mas).
         pmra : float, None
@@ -228,14 +239,15 @@ class EpochAstrometry(ExoGaia):
             FOV transits has an issue (see Lindegren et al. 2021).
             The default is ``None``, in which case no data
             is rejected.
-        occ_func : Callable, None
-            Function that calculates the planet occurrence rate for
-            a given primary mass (Msun) and semi-major-axis (au).
-            This function is used if ``sma`` is set to ``None``.
-            The relation from `Fulton et al. (2021) <https://ui.
-            adsabs.harvard.edu/abs/2021ApJS..255...14F>`_ is used
-            if the argument is set to ``None`` and ``sma`` is
-            also set to ``None``.
+        occ_rate : str, OccurrenceRate, None
+            Occurrence-rate prescription ("fls_fulton2021",
+            "gpi_nielsen2019") for sampling the companion
+            mass, ``mass_2``, and the semi-major axis,
+            ``sma``. Or, an ``OccurrenceRate`` object, which
+            also allows for a manually provided occurrence
+            rate function. The arguments of ``mass_2`` and
+            ``sma`` are ignored if the argument of
+            ``occ_rate`` is not set to ``None``.
         verbose : bool
             Print some information.
 
@@ -248,11 +260,8 @@ class EpochAstrometry(ExoGaia):
             semi-major axis (au), eccentricity, inclination (rad),
             argument of periastron (rad), position angle of
             ascending node (rad), relative time of periastron,
-            primary mass (Msun), secondary mass (Msun).
+            primary mass (Msun), companion mass (Mjup).
         """
-
-        if verbose:
-            self.print_section("Simulate data")
 
         # For simulated data, UWE == RUWE when fitting models
 
@@ -275,81 +284,29 @@ class EpochAstrometry(ExoGaia):
             self.pmdec = pmdec
             self.phot_g_mean_mag = phot_g_mean_mag
 
-        # Simulating single star or binary system?
-
-        @beartype
-        def planet_occurrence(
-            sma_planet: float,
-            mass_star: float,
-            mass_planet: float,
-        ) -> float:
-            """
-            Planet occurrence-rate density as given by Equation 5
-            in Fulton et al. (2021). The occurrence density is
-            defined as d^2 N / (dln(a) dln(M_p)) with an implicit
-            log-flat mass-dependence over 30–6000 Earth masses.
-            The function is therefore valid for planet mass in the
-            range of 30 to 6000 Earth masses and semi-major axes
-            in the range of 0.03 to 30 au.
-
-            Parameters
-            ----------
-            sma_planet : float
-                Semi-major axis of the planet orbit (au).
-            mass_star : float
-                Primary mass (Msun).
-            mass_planet : float
-                Secondary mass (Msun).
-
-            Returns
-            -------
-            float
-                Planet occurrence-rate density.
-            """
-
-            # Planetary mass range (Mearth)
-            m_min, m_max = 30.0, 6000.0
-
-            mass_planet_earth = (mass_planet * u.M_sun).to(u.M_earth)
-
-            if mass_planet_earth < m_min | mass_planet_earth > m_max:
-                warnings.warn(
-                    "The argument of 'mass_planet' is outside the "
-                    "calibrated range: ({m_min}, {m_max}) Mearth."
-                )
-
-            # Semi-major axis range
-            a_min, a_max = 0.03, 30.0
-
-            if sma_planet < a_min | sma_planet > a_max:
-                warnings.warn(
-                    "The argument of 'sma_planet' is outside the "
-                    "calibrated range: ({a_min}, {a_max}) au."
-                )
-
-            # Broken powerlaw parameters (Fulton et al. 2021)
-            norm_fulton = 350.0
-            beta = -0.86
-            a_break = 3.6
-            gamma = 1.59
-
-            # Number of giant planets scales approximately
-            # linearly with stellar mass.
-            # See Equation 24 in Lammers & Winn (2025)
-            norm_lammers = norm_fulton * (mass_star / 0.9)
-
-            occ_rate = (
-                norm_lammers
-                * (sma_planet**beta)
-                * (1.0 - np.exp(-((sma_planet / a_break) ** gamma)))
+        elif (
+            self.ra is None
+            or self.dec is None
+            or self.parallax is None
+            or self.pmra is None
+            or self.pmdec is None
+            or self.phot_g_mean_mag is None
+        ):
+            raise ValueError(
+                "Please either provide the stellar parameters "
+                "as arguments of 'ra', 'dec', 'parallax', "
+                "'pmra', 'pmdec', and 'phot_g_mean_mag', or "
+                "use the 'query_source()' method to adopt "
+                "the values from Gaia."
             )
 
-            return occ_rate
+        # Simulating single star or binary system?
 
-        if mass_1 is None or mass_2 is None:
+        mass_1 = self.primary_mass[0]
+
+        if mass_2 is None and occ_rate is None:
             binary = False
 
-            mass_1 = 0.0
             mass_2 = 0.0
             sma = 0.0
             ecc = 0.0
@@ -358,23 +315,28 @@ class EpochAstrometry(ExoGaia):
             pan = 0.0
             tau = 0.0
 
-            if verbose:
-                print("System type: single")
-
         else:
             binary = True
-
-            if verbose:
-                print("System type: binary")
 
             # Sample random orbit parameters if not provided
 
             rng = np.random.default_rng()
 
             if sma is None:
-                # sma = rng.uniform(0.1, 30.0)
-                log_sma = rng.uniform(np.log10(0.1), np.log10(30.0))
-                sma = 10.0**log_sma
+                if occ_rate is None:
+                    # Sample log-uniform between 0.1 and 30 au
+
+                    log_sma = rng.uniform(np.log10(0.1), np.log10(30.0))
+                    sma = 10.0**log_sma
+
+                else:
+                    if isinstance(occ_rate, str):
+                        occ_rate = OccurrenceRate(
+                            primary_mass=self.primary_mass[0], occ_rate=occ_rate
+                        )
+
+                    sma, mass_2 = occ_rate.sample_planets(allow_reject=False)
+                    sma, mass_2 = sma[0], mass_2[0]
 
             if ecc is None:
                 # Beta distribution (Kipping 2013)
@@ -391,6 +353,14 @@ class EpochAstrometry(ExoGaia):
 
             if tau is None:
                 tau = rng.uniform(0.0, 1.0)
+
+        if verbose:
+            self.print_section("Simulate data")
+
+            if binary:
+                print("System type: binary")
+            else:
+                print("System type: single")
 
         # Scan angles, parallax factors, and observation
         # times have been retrieved with GOST (see
@@ -530,17 +500,18 @@ class EpochAstrometry(ExoGaia):
 
         if binary:
             # Orbital period (days)
-            # Use sma in au and masses in Msun
-            period = np.sqrt(sma**3 / (mass_1 + mass_2)) * 365.25
+            # Use semi-major axis in au and masses in Msun
+            mass_2_sun = ((mass_2 * u.M_jup).to(u.M_sun)).value
+            period = np.sqrt(sma**3 / (mass_1 + mass_2_sun)) * 365.25
 
-            # Semi-major axis of the photocenter/primary (au)
-            sma_0 = sma * mass_2 / (mass_1 + mass_2)
+            # Semi-major axis of the photocenter (=primary) (au)
+            sma_0 = sma * mass_2_sun / (mass_1 + mass_2_sun)
             sma_0 *= self.parallax  # (mas)
 
             if verbose:
                 print("\nOrbit parameters:")
                 print(f"   - Primary mass (Msun) = {mass_1:.2f}")
-                print(f"   - Secondary mass (Msun) = {mass_2:.2f}")
+                print(f"   - Companion mass (Mjup) = {mass_2:.2f}")
                 print(f"   - Relative semi-major axis (au) = {sma:.2f}")
                 print(f"   - Eccentricity = {ecc:.2f}")
                 print(f"   - Inclination (deg) = {np.degrees(inc):.2f}")
@@ -596,7 +567,7 @@ class EpochAstrometry(ExoGaia):
         return model_param
 
     @beartype
-    def get_nss_tables(self, gaia_release = "DR3") -> None:
+    def get_nss_tables(self, gaia_release="DR3") -> None:
         """
         Method for downloading and storing the Gaia non-single star
         (NSS) tables. The output will be stored in `ECSV files
@@ -680,7 +651,7 @@ class EpochAstrometry(ExoGaia):
         self,
         source_id: typing.Optional[typing.Union[int, str]] = None,
         gaia_release: str = "DR3",
-    ) -> typing.List[float]:
+    ) -> typing.List[Real]:
         """
         Method for retrieving stellar parameter from the Gaia catalog,
         specifically the RA/Dec, parallax, proper motion, and G-band
@@ -963,7 +934,8 @@ class EpochAstrometry(ExoGaia):
             self.primary_mass = (0.76, 0.05)  # (Msun)
 
         print(
-            f"\nPrimary mass (Msun): {self.primary_mass[0]:.2f} +/- {self.primary_mass[1]:.2f}"
+            f"\nPrimary mass (Msun): {self.primary_mass[0]:.2f} "
+            f"+/- {self.primary_mass[1]:.2f}"
         )
 
         self.data_table = pd.read_csv(

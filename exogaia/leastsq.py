@@ -4,6 +4,8 @@ Module with the ``LeastSquares`` class.
 
 import warnings
 
+from numbers import Real
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -70,7 +72,8 @@ class LeastSquares(ExoGaia):
 
     def __repr__(self):
         """
-        String representation of the best-fit model parameters.
+        Representation of the ``LeastSquares`` object that includes
+        the best-fit model parameters from the last method called.
 
         Returns
         -------
@@ -165,7 +168,7 @@ class LeastSquares(ExoGaia):
     @beartype
     def calc_excess_noise(
         self, verbose: bool = True
-    ) -> typing.Tuple[typing.Optional[float], typing.Optional[float]]:
+    ) -> typing.Tuple[typing.Optional[Real], typing.Optional[Real]]:
         """
         Compute the astrometric excess noise (AEN).
 
@@ -274,7 +277,7 @@ class LeastSquares(ExoGaia):
         design: np.ndarray,
         obs_pos: typing.Optional[np.ndarray] = None,
         verbose: bool = True,
-    ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray, Real]:
         """
         Method for calculating a least-squares fit for a given
         design matrix and 1D position measurements.
@@ -378,8 +381,8 @@ class LeastSquares(ExoGaia):
         param_sig = np.sqrt(np.diag(cov_matrix))
 
         def significance(
-            param_1: float, param_2: float, sigma_1: float, sigma_2: float, rho: float
-        ) -> float:
+            param_1: Real, param_2: Real, sigma_1: Real, sigma_2: Real, rho: Real
+        ) -> Real:
             """
             Compute the combined significance of two correlated
             parameters, taking into account their uncertainties
@@ -1599,12 +1602,14 @@ class LeastSquares(ExoGaia):
 
         sma_0_sigma = np.sqrt(grad_a @ global_cov[5:, 5:] @ grad_a)
 
-        # Calculate mass function
+        # Calculate mass function (Msun)
         # See equation 1 in Halbwachs et al. (2023)
+        # global_param[2] = parallax (mas)
+        # global_param[9] = period (days)
 
         f_mass = (sma_0 / global_param[2]) ** 3 / (global_param[9] / 365.25) ** 2
 
-        # Companion mass M2
+        # Companion mass (Msun)
         # See equation 2 in Gaia colab (2025) on Gaia BH3
         # f_mass = M2 (M2/(M1+M2))**2
 
@@ -1616,7 +1621,12 @@ class LeastSquares(ExoGaia):
         # Relative semi-major axis (i.e. a = a1 + a2) in mas
 
         sma = ((period / 365.25) ** 2 * (self.primary_mass[0] + mass_2)) ** (1.0 / 3.0)
-        sma /= global_param[2]  # (au)
+        sma /= global_param[2]  # (mas) -> (au)
+
+        # Convert from Msun to Mjup
+
+        f_mass_jup = ((f_mass * u.M_sun).to(u.M_jup)).value
+        mass_2_jup = ((mass_2 * u.M_sun).to(u.M_jup)).value
 
         # Print best-fit parameters
 
@@ -1649,8 +1659,8 @@ class LeastSquares(ExoGaia):
             f"   - Semi-major axis of photocenter (mas) = {sma_0:.3f} +/- {sma_0_sigma:.3f}"
         )
         print(f"   - Relative semi-major axis (au) = {sma:.3f}")
-        print(f"   - Mass function (Msun) = {f_mass:.3f}")
-        print(f"   - Secondary mass (Msun) = {mass_2:.3f}")
+        print(f"   - Mass function (Mjup) = {f_mass_jup:.3e}")
+        print(f"   - Companion mass (Mjup) = {mass_2_jup:.3f}")
 
         # Select minimum RUWE along the 3rd axis to create a 2D array
 
@@ -2284,7 +2294,10 @@ class LeastSquares(ExoGaia):
             )
 
             # Time of periastron in Julian years
-            t_per = self.ref_epoch.value + (self.best_param[5] * self.best_param[7]) / 365.25
+            t_per = (
+                self.ref_epoch.value
+                + (self.best_param[5] * self.best_param[7]) / 365.25
+            )
 
             delta_ra_per, delta_dec_per = kepler_model.calc_orbit(
                 self.best_param, obs_time=np.array([t_per])
@@ -2341,7 +2354,7 @@ class LeastSquares(ExoGaia):
             axs[1].set_xlabel(r"$\Delta\alpha$ (mas)")
             axs[1].set_ylabel(r"$\Delta\delta$ (mas)")
             axs[1].invert_xaxis()
-            axs[1].legend(loc="best", frameon=False, fontsize=8)
+            axs[1].legend(loc="upper left", frameon=False, fontsize=8)
 
             axs[2].errorbar(
                 obs_time[0],

@@ -24,6 +24,9 @@ Below you can find tutorials that highlight the functionalities of ``exogaia``. 
 - :doc:`tutorials/completeness`
   – Compute a DR4/DR5 completeness map for a Gaia source
 
+- :doc:`tutorials/occurrence_rate`
+  – Sample planet masses and semi-major axes from occurrence rates
+
 .. toctree::
    :hidden:
    :maxdepth: 1
@@ -33,3 +36,4 @@ Below you can find tutorials that highlight the functionalities of ``exogaia``. 
    tutorials/binary_orbit.ipynb
    tutorials/gaia_bh3.ipynb
    tutorials/completeness.ipynb
+   tutorials/occurrence_rate.ipynb

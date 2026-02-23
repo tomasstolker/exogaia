@@ -2,10 +2,25 @@
 Module with utility functions.
 """
 
+from numbers import Real
+
 import numpy as np
 
+from beartype import beartype, typing
 
-def orbit_sky(nu, sma, ecc, inc, aop, pan):
+
+@beartype
+def orbit_sky(
+    nu: typing.Union[Real, np.ndarray],
+    sma: Real,
+    ecc: Real,
+    inc: Real,
+    aop: Real,
+    pan: Real,
+) -> typing.Tuple[
+    typing.Union[Real, np.ndarray],
+    typing.Union[Real, np.ndarray],
+]:
     """
     Compute the projected sky-plane coordinates of a Keplerian orbit.
 

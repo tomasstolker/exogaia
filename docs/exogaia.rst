@@ -44,6 +44,14 @@ exogaia.models module
    :show-inheritance:
    :undoc-members:
 
+exogaia.planets module
+----------------------
+
+.. automodule:: exogaia.planets
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 exogaia.priors module
 ---------------------
 

@@ -3,27 +3,12 @@ Initialization of the ``exogaia`` package.
 """
 
 import json
-import os
 import socket
 import urllib.request
 
 import matplotlib as mpl
 
-from exogaia.data import EpochAstrometry
-from exogaia.leastsq import LeastSquares
-from exogaia.limits import CompletenessMap
-from exogaia.models import KeplerModel
-from exogaia.priors import (
-    FixedPrior,
-    LogUniformPrior,
-    NormalPrior,
-    SinPrior,
-    UniformPrior,
-)
-from exogaia.results import SamplingResults
-from exogaia.samplers import MCMCSampler, NestedSampler
-
-from ._version import __version__, __version_tuple__
+from ._version import __version_tuple__
 
 __author__ = "Tomas Stolker"
 __license__ = "MIT"
@@ -42,13 +27,13 @@ try:
     with urllib.request.urlopen(PYPI_URL, timeout=1.0) as open_url:
         url_content = open_url.read()
         url_data = json.loads(url_content)
-        pypi_version = url_data["info"]["version"]
+        PYPI_VERSION = url_data["info"]["version"]
 
 except (urllib.error.URLError, socket.timeout):
-    pypi_version = None
+    PYPI_VERSION = None
 
-if pypi_version is not None:
-    pypi_split = pypi_version.split(".")
+if PYPI_VERSION is not None:
+    pypi_split = PYPI_VERSION.split(".")
     current_split = EXOGAIA_VERSION.split(".")
 
     new_major = (pypi_split[0] == current_split[0]) & (pypi_split[1] > current_split[1])
@@ -60,7 +45,7 @@ if pypi_version is not None:
     )
 
     if new_major | new_minor:
-        print(f"\nexogaia v{pypi_version} is available!")
+        print(f"\nexogaia v{PYPI_VERSION} is available!")
 
 # Set Matplotlib style
 

@@ -3,6 +3,7 @@ Module for setting up parameter priors.
 """
 
 from abc import ABC, abstractmethod
+from numbers import Real
 
 import numpy as np
 
@@ -34,7 +35,7 @@ class UniformPrior(Prior):
     """
 
     @beartype
-    def __init__(self, min_val: float, max_val: float) -> None:
+    def __init__(self, min_val: Real, max_val: Real) -> None:
         """
         Parameters
         ----------
@@ -111,7 +112,7 @@ class LogUniformPrior(Prior):
     """
 
     @beartype
-    def __init__(self, min_val: float, max_val: float) -> None:
+    def __init__(self, min_val: Real, max_val: Real) -> None:
         """
         Parameters
         ----------
@@ -192,10 +193,10 @@ class NormalPrior(Prior):
     @beartype
     def __init__(
         self,
-        mu: float,
-        sigma: float,
+        mu: Real,
+        sigma: Real,
         truncate_zero: bool = False,
-        truncate_upper: typing.Optional[float] = None,
+        truncate_upper: typing.Optional[Real] = None,
     ) -> None:
         """
         Parameters
@@ -370,7 +371,7 @@ class FixedPrior(Prior):
     """
 
     @beartype
-    def __init__(self, fix_val: float) -> None:
+    def __init__(self, fix_val: Real) -> None:
         """
         Parameters
         ----------

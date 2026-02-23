@@ -12,4 +12,5 @@ Documentation for *exogaia*
    installation
    tutorials
    modules
+   faq
    about

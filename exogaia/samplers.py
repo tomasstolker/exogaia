@@ -7,6 +7,8 @@ import pickle
 import sys
 import warnings
 
+from numbers import Real
+
 import dynesty
 import emcee
 import numpy as np
@@ -233,7 +235,7 @@ class NestedSampler(ExoGaia):
         # # Default: normal(primary_mass[0], primary_mass[1])
         # cube[12] = self.priors["mass_1"].draw_samples(1)[0]
         #
-        # # Secondary mass (Msun)
+        # # Companion mass (Mjup)
         # if isinstance(self.priors["mass_2"], FixedPrior):
         #     cube[12] = self.priors["mass_2"].fix_val
         # else:
@@ -258,7 +260,7 @@ class NestedSampler(ExoGaia):
         return cube
 
     @beartype
-    def log_likelihood(self, params) -> typing.Union[np.float64, float]:
+    def log_likelihood(self, params) -> Real:
         """
         Method for calculating the log-likelihood for the
         sampled parameter cube.
@@ -436,9 +438,7 @@ class NestedSampler(ExoGaia):
             self.prior_transform(cube)
 
         @beartype
-        def log_like_multinest(
-            params, n_dim: int, n_param: int
-        ) -> typing.Union[float, np.float64]:
+        def log_like_multinest(params, n_dim: int, n_param: int) -> Real:
             """
             Method for calculating the log-likelihood for the
             sampled parameter cube.
@@ -530,7 +530,7 @@ class NestedSampler(ExoGaia):
         n_live_points: int = 500,
         resume: bool = False,
         output_folder: str = "dynesty/",
-        evidence_tolerance: float = 0.5,
+        evidence_tolerance: Real = 0.5,
         dynamic: bool = False,
         sample_method: str = "auto",
         bound: str = "multi",
@@ -985,7 +985,7 @@ class MCMCSampler(ExoGaia):
             # self.priors["mass_2"] = UniformPrior(0.0, 1.0)
 
     @beartype
-    def log_prior(self, params: np.ndarray) -> float:
+    def log_prior(self, params: np.ndarray) -> Real:
         """
         Method for the log-prior used by the MCMC.
 
@@ -1052,7 +1052,7 @@ class MCMCSampler(ExoGaia):
         return log_prior
 
     @beartype
-    def log_likelihood(self, params: np.ndarray) -> float:
+    def log_likelihood(self, params: np.ndarray) -> Real:
         """
         Method for the log-likelihood used by the MCMC.
 
@@ -1085,7 +1085,7 @@ class MCMCSampler(ExoGaia):
         return -0.5 * np.sum(res**2 / var)
 
     @beartype
-    def log_probability(self, params: np.ndarray) -> typing.Tuple[float, float]:
+    def log_probability(self, params: np.ndarray) -> typing.Tuple[Real, Real]:
         """
         Method for the log-probability used by the MCMC.
 

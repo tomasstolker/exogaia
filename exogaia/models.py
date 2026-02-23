@@ -2,6 +2,8 @@
 Module with the ``StarModel`` and ``KeplerModel`` classes.
 """
 
+from numbers import Real
+
 import kepler
 import matplotlib.pyplot as plt
 import numpy as np
@@ -74,7 +76,7 @@ class StarModel(ExoGaia):
     @beartype
     def calc_2d_model(
         self,
-        model_param: typing.Union[typing.List[float], np.ndarray],
+        model_param: typing.Union[typing.List[Real], np.ndarray],
         obs_time: typing.Optional[np.ndarray] = None,
     ) -> typing.Tuple[np.ndarray, np.ndarray, typing.Optional[np.ndarray]]:
         """
@@ -227,7 +229,7 @@ class StarModel(ExoGaia):
     @beartype
     def calc_1d_model(
         self,
-        model_param: typing.Union[typing.List[float], np.ndarray],
+        model_param: typing.Union[typing.List[Real], np.ndarray],
         calc_parallax: bool = False,
     ) -> np.ndarray:
         """
@@ -332,9 +334,9 @@ class KeplerModel(ExoGaia):
     @beartype
     def solve_kepler(
         self,
-        period: float,
-        ecc: float,
-        tau: float,
+        period: Real,
+        ecc: Real,
+        tau: Real,
         obs_time: typing.Optional[np.ndarray] = None,
     ) -> typing.Tuple[np.ndarray, np.ndarray]:
         """
@@ -394,8 +396,8 @@ class KeplerModel(ExoGaia):
 
     @beartype
     def thiele_innes(
-        self, sma: float, inc: float, aop: float, pan: float
-    ) -> typing.Tuple[float, float, float, float]:
+        self, sma: Real, inc: Real, aop: Real, pan: Real
+    ) -> typing.Tuple[Real, Real, Real, Real]:
         """
         Method for calculating the Thiele-Innes elements.
 
@@ -443,7 +445,7 @@ class KeplerModel(ExoGaia):
     @beartype
     def calc_orbit(
         self,
-        model_param: typing.Union[typing.List[float], np.ndarray],
+        model_param: typing.Union[typing.List[Real], np.ndarray],
         obs_time: typing.Optional[np.ndarray] = None,
     ) -> typing.Tuple[np.ndarray, np.ndarray]:
         """
@@ -508,7 +510,7 @@ class KeplerModel(ExoGaia):
     @beartype
     def calc_2d_model(
         self,
-        model_param: typing.Union[typing.List[float], np.ndarray],
+        model_param: typing.Union[typing.List[Real], np.ndarray],
         obs_time: typing.Optional[np.ndarray] = None,
     ) -> typing.Tuple[np.ndarray, np.ndarray]:
         """
@@ -595,7 +597,7 @@ class KeplerModel(ExoGaia):
     @beartype
     def calc_1d_model(
         self,
-        model_param: typing.Union[typing.List[float], np.ndarray],
+        model_param: typing.Union[typing.List[Real], np.ndarray],
         obs_time: typing.Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """
@@ -688,7 +690,7 @@ class KeplerModel(ExoGaia):
 
     @beartype
     def calc_residuals(
-        self, model_param: typing.Union[typing.List[float], np.ndarray]
+        self, model_param: typing.Union[typing.List[Real], np.ndarray]
     ) -> np.ndarray:
         """
         Method for calculating the residuals between the model
@@ -747,7 +749,7 @@ class KeplerModel(ExoGaia):
     @beartype
     def plot_orbit(
         self,
-        model_param: typing.Union[typing.List[float], np.ndarray],
+        model_param: typing.Union[typing.List[Real], np.ndarray],
         plot_file: typing.Optional[str] = None,
     ) -> Figure:
         """
@@ -919,7 +921,7 @@ class KeplerModel(ExoGaia):
         plt.xlim(lim_max, -lim_max)
         plt.ylim(-lim_max, lim_max)
 
-        plt.legend(loc="best", frameon=False, fontsize=8)
+        plt.legend(loc="upper left", frameon=False, fontsize=8)
 
         if plot_file is None:
             plt.show()

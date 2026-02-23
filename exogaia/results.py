@@ -4,6 +4,8 @@ Module with the ``SamplingResults`` class.
 
 import pickle
 
+from numbers import Real
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -100,7 +102,6 @@ class SamplingResults(ExoGaia):
             r"$\varpi$ (mas)",
             r"$\mu_\alpha$ (mas/yr)",
             r"$\mu_\delta$ (mas/yr)",
-            # r"$\log{a/\mathrm{au}}$",
             r"$\log{P/\mathrm{days}}$",
             r"$e$",
             r"$\tau$",
@@ -108,8 +109,6 @@ class SamplingResults(ExoGaia):
             r"$i$ (deg)",
             r"$\omega$ (deg)",
             r"$\Omega$ (deg)",
-            # r"$M_1$ ($M_\odot$)",
-            # r"$\log{M_2/M_\odot}$",
         ]
 
     @beartype
@@ -198,7 +197,7 @@ class SamplingResults(ExoGaia):
     @beartype
     def plot_posterior(
         self,
-        truths: typing.Optional[typing.List[float]] = None,
+        truths: typing.Optional[typing.List[Real]] = None,
         plot_file: typing.Optional[str] = None,
     ) -> Figure:
         """
@@ -241,11 +240,6 @@ class SamplingResults(ExoGaia):
         if truths is not None:
             truths_new[8] = np.log10(truths_new[8])
 
-        # Convert mass_2 to log10(mass_2)
-        # post_samples[:, 12] = np.log10(post_samples[:, 12])
-        # if truths is not None:
-        #     truths[12] = np.log10(truths[12])
-
         # Convert inc, aop, pan from rad to deg
         post_samples[:, 9:] = np.degrees(post_samples[:, 9:])
         if truths is not None:
@@ -272,7 +266,6 @@ class SamplingResults(ExoGaia):
             r"$\varpi$",
             r"$\mu_\alpha$",
             r"$\mu_\delta$",
-            # r"$\log{a/\mathrm{au}}$",
             r"$\log{P/\mathrm{days}}$",
             r"$e$",
             r"$\tau$",
@@ -280,10 +273,6 @@ class SamplingResults(ExoGaia):
             r"$i$",
             r"$\omega$",
             r"$\Omega$",
-            # r"$t_\mathrm{p}$",
-            # r"$M_1$",
-            # r"$M_2$",
-            r"$\log{M_2/M_\odot}$",
         ]
 
         units = [
@@ -299,7 +288,6 @@ class SamplingResults(ExoGaia):
             "(deg)",
             "(deg)",
             "(deg)",
-            # r"($M_\odot$)",
         ]
 
         titles = []
@@ -642,7 +630,7 @@ class SamplingResults(ExoGaia):
         plt.xlim(lim_max, -lim_max)
         plt.ylim(-lim_max, lim_max)
 
-        plt.legend(loc="best", frameon=False, fontsize=8)
+        plt.legend(loc="upper left", frameon=False, fontsize=8)
 
         if plot_file is None:
             plt.show()

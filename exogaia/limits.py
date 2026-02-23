@@ -2,6 +2,8 @@
 Module with the ``CompletenessMap`` class.
 """
 
+from numbers import Real
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -30,7 +32,7 @@ class CompletenessMap(ExoGaia):
     def __init__(
         self,
         source_id: typing.Union[int, str],
-        primary_mass: typing.Tuple[float, float],
+        primary_mass: typing.Tuple[Real, Real],
         gaia_release: str = "DR4",
     ) -> None:
         """
@@ -63,11 +65,11 @@ class CompletenessMap(ExoGaia):
     @beartype
     def calc_completeness(
         self,
-        n_sigma: typing.Union[float, int] = 5,
+        n_sigma: Real = 5,
         n_samples: int = 30,
         mass_points: typing.Optional[np.ndarray] = None,
         sma_points: typing.Optional[np.ndarray] = None,
-        filter_sigma: typing.Optional[float] = None,
+        filter_sigma: typing.Optional[Real] = None,
         plot_file: typing.Optional[str] = None,
     ) -> Figure:
         """
@@ -83,14 +85,14 @@ class CompletenessMap(ExoGaia):
         ----------
         n_sigma : float, optional
             Detection threshold in units of acceleration signal-to-noise
-            (default is 5.0).
-        n_samples : int, optional
-            Number of Monte Carlo realizations per grid point. Note that this
-            value is internally overridden to 50 in the current implementation.
-        mass_points : numpy.ndarray or None, optional
-            Grid of secondary (companion) masses in solar masses. If None,
-            a linear grid between 0.001 and 0.1 Msun is used.
-        sma_points : numpy.ndarray or None, optional
+            (default: 5.0).
+        n_samples : int
+            Number of Monte Carlo realizations per grid point
+            (default: 30).
+        mass_points : np.ndarray, None
+            Grid of companion masses (Mjup). If ``None``, a linear
+            grid between 1 and 100 Mjup is used.
+        sma_points : np.ndarray, None
             Grid of semi-major axes in astronomical units. If None, a logarithmic
             grid between 0.1 and 100 au is used.
         filter_sigma : float, None
@@ -100,7 +102,7 @@ class CompletenessMap(ExoGaia):
             well if for example the number of grid points is 50 in
             both the mass and semi-major axis dimension. No filter is
             applied if the argument is set to ``None``.
-        plot_file : str or None, optional
+        plot_file : str, None
             If provided, the completeness map is saved to this file. If None,
             the plot is shown interactively.
 
@@ -126,8 +128,8 @@ class CompletenessMap(ExoGaia):
         self.print_section("Completeness map")
 
         if mass_points is None:
-            # Grid points for companion mass (Msun)
-            mass_points = np.linspace(0.001, 0.1, 50)
+            # Grid points for companion mass (Mjup)
+            mass_points = np.linspace(1.0, 100.0, 50)
 
         if sma_points is None:
             # Grid points for semi-major axis (au)
@@ -141,7 +143,6 @@ class CompletenessMap(ExoGaia):
             for sma_idx, sma_item in enumerate(sma_points):
                 for _ in range(n_samples):
                     self.epoch_astrom.simulate_data(
-                        mass_1=self.primary_mass[0],
                         mass_2=m2_item,
                         sma=sma_item,
                         verbose=False,
@@ -186,10 +187,8 @@ class CompletenessMap(ExoGaia):
 
         fig, ax = plt.subplots(figsize=(5, 3))
 
-        mass_jup = (mass_points * u.M_sun).to(u.M_jup)
-
         mesh = ax.pcolormesh(
-            sma_points, mass_jup, 100.0 * compl_map, vmin=0.0, vmax=100.0
+            sma_points, mass_points, 100.0 * compl_map, vmin=0.0, vmax=100.0
         )
 
         cbar = plt.colorbar(mesh, ax=ax)
