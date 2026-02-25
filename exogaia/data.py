@@ -38,6 +38,7 @@ class EpochAstrometry(ExoGaia):
         self,
         primary_mass: typing.Optional[typing.Tuple[Real, Real]] = None,
         gaia_release: str = "DR4",
+        verbose: bool = True,
     ) -> None:
         """
         Parameters
@@ -50,6 +51,8 @@ class EpochAstrometry(ExoGaia):
             Gaia release (DR3, DR4, DR5) of the epoch astrometry.
             Simulating data is possible for all releases, but querying
             data will only be possible for the upcoming DR4 and DR5.
+        verbose : bool
+            Print some information.
 
         Returns
         -------
@@ -57,7 +60,10 @@ class EpochAstrometry(ExoGaia):
             None
         """
 
-        self.print_section("Epoch astrometry")
+        self.verbose = verbose
+
+        if self.verbose:
+            self.print_section("Epoch astrometry")
 
         self.gaia_release = gaia_release
         self.primary_mass = primary_mass
@@ -88,14 +94,15 @@ class EpochAstrometry(ExoGaia):
             self.ref_epoch = Time("2020.0", format="jyear", scale="tcb")
             self.time_end = Time("2025-01-15 00:00:00", scale="utc")
 
-        print(f"Gaia release: {self.gaia_release}")
-        print(f"Reference epoch: {self.ref_epoch}")
+        if self.verbose:
+            print(f"Gaia release: {self.gaia_release}")
+            print(f"Reference epoch: {self.ref_epoch}")
 
-        if primary_mass is not None:
-            print(
-                f"\nPrimary mass (Msun): {primary_mass[0]:.2f} "
-                f"+/- {primary_mass[1]:.2f}"
-            )
+            if primary_mass is not None:
+                print(
+                    f"\nPrimary mass (Msun): {primary_mass[0]:.2f} "
+                    f"+/- {primary_mass[1]:.2f}"
+                )
 
     def __repr__(self):
         """
@@ -133,12 +140,14 @@ class EpochAstrometry(ExoGaia):
             None
         """
 
-        self.print_section("Read data file")
+        if self.verbose:
+            self.print_section("Read data file")
 
         self.data_table = pd.read_csv(data_file)
 
-        print(f"Data file: {data_file}")
-        print(f"Data shape: {self.data_table.shape}")
+        if self.verbose:
+            print(f"Data file: {data_file}")
+            print(f"Data shape: {self.data_table.shape}")
 
         if "relative_time_year" not in self.data_table:
             self.data_table["relative_time_year"] = (
@@ -170,7 +179,6 @@ class EpochAstrometry(ExoGaia):
         phot_g_mean_mag: typing.Optional[Real] = None,
         reject_fraction: typing.Optional[Real] = None,
         occ_rate: typing.Union[typing.Optional[str], OccurrenceRate] = None,
-        verbose: bool = True,
     ) -> typing.List[Real]:
         """
         Method to simulate the epoch astrometry for a
@@ -248,8 +256,6 @@ class EpochAstrometry(ExoGaia):
             rate function. The arguments of ``mass_2`` and
             ``sma`` are ignored if the argument of
             ``occ_rate`` is not set to ``None``.
-        verbose : bool
-            Print some information.
 
         Returns
         -------
@@ -332,29 +338,35 @@ class EpochAstrometry(ExoGaia):
                 else:
                     if isinstance(occ_rate, str):
                         occ_rate = OccurrenceRate(
-                            primary_mass=self.primary_mass[0], occ_rate=occ_rate
+                            primary_mass=self.primary_mass[0],
+                            occ_rate=occ_rate,
+                            verbose=self.verbose,
                         )
 
-                    sma, mass_2 = occ_rate.sample_planets(allow_reject=False)
+                    sma, mass_2 = occ_rate.sample_planets(allow_reject=True)
                     sma, mass_2 = sma[0], mass_2[0]
 
-            if ecc is None:
-                # Beta distribution (Kipping 2013)
-                ecc = rng.beta(a=0.867, b=3.03)
+                    if np.isnan(sma):
+                        binary = False
 
-            if inc is None:
-                inc = np.arccos(rng.uniform(-1.0, 1.0))
+            if binary:
+                if ecc is None:
+                    # Beta distribution (Kipping 2013)
+                    ecc = rng.beta(a=0.867, b=3.03)
 
-            if aop is None:
-                aop = rng.uniform(0.0, 2.0 * np.pi)
+                if inc is None:
+                    inc = np.arccos(rng.uniform(-1.0, 1.0))
 
-            if pan is None:
-                pan = rng.uniform(0.0, 2.0 * np.pi)
+                if aop is None:
+                    aop = rng.uniform(0.0, 2.0 * np.pi)
 
-            if tau is None:
-                tau = rng.uniform(0.0, 1.0)
+                if pan is None:
+                    pan = rng.uniform(0.0, 2.0 * np.pi)
 
-        if verbose:
+                if tau is None:
+                    tau = rng.uniform(0.0, 1.0)
+
+        if self.verbose:
             self.print_section("Simulate data")
 
             if binary:
@@ -372,7 +384,8 @@ class EpochAstrometry(ExoGaia):
         data_folder = Path.home() / ".exogaia"
 
         if not data_folder.exists():
-            print(f"Creating folder: {str(data_folder)}")
+            if self.verbose:
+                print(f"Creating folder: {str(data_folder)}")
             data_folder.mkdir(parents=True, exist_ok=False)
 
         file_name = "healpix_data.hdf5"
@@ -380,7 +393,8 @@ class EpochAstrometry(ExoGaia):
         url = "https://home.strw.leidenuniv.nl/~stolker/exogaia/healpix_data.hdf5"
 
         if not healpix_file.exists():
-            print()
+            if self.verbose:
+                print()
 
             pooch.retrieve(
                 url=url,
@@ -465,8 +479,9 @@ class EpochAstrometry(ExoGaia):
             )
 
         sigma_per_transit = sigma_per_ccd / np.sqrt(n_ccd_avg)
-        if verbose:
+        if self.verbose:
             print(f"\nAL scan uncertainty (per CCD) = {1e3*sigma_per_ccd:.2f} uas")
+
             print(
                 f"AL scan uncertainty (per transit) = {1e3*sigma_per_transit:.2f} uas"
             )
@@ -483,7 +498,7 @@ class EpochAstrometry(ExoGaia):
 
         self.data_table = pd.DataFrame(sim_astrom)
 
-        if verbose:
+        if self.verbose:
             print("\nStellar parameters:")
             print(f"   - RA (deg) = {self.ra:.2f}")
             print(f"   - Dec (deg) = {self.dec:.2f}")
@@ -508,7 +523,7 @@ class EpochAstrometry(ExoGaia):
             sma_0 = sma * mass_2_sun / (mass_1 + mass_2_sun)
             sma_0 *= self.parallax  # (mas)
 
-            if verbose:
+            if self.verbose:
                 print("\nOrbit parameters:")
                 print(f"   - Primary mass (Msun) = {mass_1:.2f}")
                 print(f"   - Companion mass (Mjup) = {mass_2:.2f}")
@@ -586,7 +601,8 @@ class EpochAstrometry(ExoGaia):
             None
         """
 
-        self.print_section("Retrieve Gaia non-single star tables")
+        if self.verbose:
+            self.print_section("Retrieve Gaia non-single star tables")
 
         if gaia_release != "DR3":
             raise ValueError(
@@ -641,7 +657,7 @@ class EpochAstrometry(ExoGaia):
             gaia_result = gaia_job.get_results()
 
             gaia_result.write(
-                f"gaia{gaia_release}_{table_item}.ecsv",
+                f"{table_item}.ecsv",
                 format="ascii.ecsv",
                 overwrite=True,
             )
@@ -649,7 +665,7 @@ class EpochAstrometry(ExoGaia):
     @beartype
     def query_source(
         self,
-        source_id: typing.Optional[typing.Union[int, str]] = None,
+        source_id: typing.Optional[typing.Union[int, np.int64, str]] = None,
         gaia_release: str = "DR3",
     ) -> typing.List[Real]:
         """
@@ -674,7 +690,8 @@ class EpochAstrometry(ExoGaia):
             RA proper motion, Dec proper motion, G-band magnitude.
         """
 
-        self.print_section("Querying source")
+        if self.verbose:
+            self.print_section("Querying source")
 
         self.source_id = source_id
 
@@ -684,8 +701,9 @@ class EpochAstrometry(ExoGaia):
                 "currently only gaia_release='DR3'."
             )
 
-        print(f"Gaia release: {gaia_release}")
-        print(f"Source ID: {self.source_id}\n")
+        if self.verbose:
+            print(f"Gaia release: {gaia_release}")
+            print(f"Source ID: {self.source_id}\n")
 
         # Retrieve RA, Dec, parallax, proper motion, and G magnitude
 
@@ -715,17 +733,25 @@ class EpochAstrometry(ExoGaia):
         pmdec_error = float(gaia_result["pmdec_error"])
         phot_g_mean_mag = float(gaia_result["phot_g_mean_mag"])
 
+        if self.verbose:
+            print(f"\nRA = {ra:.3f} deg +/- {ra_error:.3f} mas")
+            print(f"Dec = {dec:.3f} deg +/- {dec_error:.3f} mas")
+            print(f"Parallax = {parallax:.3f} +/- {parallax_error:.3f} mas")
+            print(f"Proper motion in RA = {pmra:.3f} +/- {pmra_error:.3f} mas/yr")
+            print(f"Proper motion in Dec = {pmdec:.3f} +/- {pmdec_error:.3f} mas/yr")
+            print(f"G-band magnitude = {phot_g_mean_mag:.3f}")
+
         # Effective wavenumber (i.e. pseudocolor) of the source
         # used in the astrometric solution (um-1)
-        nu_eff = float(gaia_result["nu_eff_used_in_astrometry"])
+        if not np.ma.is_masked(gaia_result["nu_eff_used_in_astrometry"]):
+            nu_eff = float(gaia_result["nu_eff_used_in_astrometry"])
+            if self.verbose:
+                print(f"Pseudocolor = {nu_eff:.2f} um-1")
 
-        print(f"\nRA = {ra:.3f} deg +/- {ra_error:.3f} mas")
-        print(f"Dec = {dec:.3f} deg +/- {dec_error:.3f} mas")
-        print(f"Parallax = {parallax:.3f} +/- {parallax_error:.3f} mas")
-        print(f"Proper motion in RA = {pmra:.3f} +/- {pmra_error:.3f} mas/yr")
-        print(f"Proper motion in Dec = {pmdec:.3f} +/- {pmdec_error:.3f} mas/yr")
-        print(f"G-band magnitude = {phot_g_mean_mag:.3f}")
-        print(f"Pseudocolor = {nu_eff:.2f} um-1")
+        else:
+            nu_eff = None
+            if self.verbose:
+                print("Pseudocolor = None")
 
         self.ra = ra
         self.dec = dec
@@ -738,28 +764,32 @@ class EpochAstrometry(ExoGaia):
         # tables of u0(g,c) by L. Lindegren (2023 Sep 13)
         # https://www.cosmos.esa.int/web/gaia/dr3-auxiliary-data
 
-        file_folder = Path(__file__).resolve().parent.parent
-        data_file = file_folder / "data/table_u0_g_c_p5.txt"
+        if nu_eff is not None:
+            file_folder = Path(__file__).resolve().parent.parent
+            data_file = file_folder / "data/table_u0_g_c_p5.txt"
 
-        norm_g_mag, norm_nu_eff, norm_u0 = np.loadtxt(
-            data_file, skiprows=1, delimiter=",", unpack=True
-        )
+            norm_g_mag, norm_nu_eff, norm_u0 = np.loadtxt(
+                data_file, skiprows=1, delimiter=",", unpack=True
+            )
 
-        g_vals = np.unique(norm_g_mag)
-        c_vals = np.unique(norm_nu_eff)
+            g_vals = np.unique(norm_g_mag)
+            c_vals = np.unique(norm_nu_eff)
 
-        u0_grid = np.reshape(norm_u0, (g_vals.size, c_vals.size))
+            u0_grid = np.reshape(norm_u0, (g_vals.size, c_vals.size))
 
-        # Should look the same as plot_u0_g_c_p5.pdf
-        # plt.pcolormesh(g_vals, c_vals, u0_grid.T, cmap='rainbow')
-        # plt.colorbar()
-        # plt.show()
+            # Should look the same as plot_u0_g_c_p5.pdf
+            # plt.pcolormesh(g_vals, c_vals, u0_grid.T, cmap='rainbow')
+            # plt.colorbar()
+            # plt.show()
 
-        u0_interp = RegularGridInterpolator(
-            (g_vals, c_vals), u0_grid, method="linear", bounds_error=True
-        )
+            u0_interp = RegularGridInterpolator(
+                (g_vals, c_vals), u0_grid, method="linear", bounds_error=True
+            )
 
-        self.u0_norm = u0_interp((self.phot_g_mean_mag, nu_eff))
+            self.u0_norm = u0_interp((self.phot_g_mean_mag, nu_eff))
+
+        else:
+            self.u0_norm = None
 
         n_param = 5
 
@@ -768,12 +798,14 @@ class EpochAstrometry(ExoGaia):
             / (gaia_result["astrometric_n_good_obs_al"] - n_param)
         )
 
-        print(f"\nUWE = {uwe:.2f}")
+        if self.verbose:
+            print(f"\nUWE = {uwe:.2f}")
 
         if "ruwe" in gaia_result.columns:
-            if not np.ma.is_masked(gaia_result["ruwe"]):
+            if not np.ma.is_masked(gaia_result["ruwe"]) and self.u0_norm is not None:
                 ruwe = gaia_result["ruwe"]
-                print(f"RUWE = {ruwe:.2f}")
+                if self.verbose:
+                    print(f"RUWE = {ruwe:.2f}")
 
                 if not np.isclose(self.u0_norm, uwe / ruwe, rtol=1e-2, atol=0.0):
                     warnings.warn(
@@ -785,20 +817,23 @@ class EpochAstrometry(ExoGaia):
             if not np.ma.is_masked(gaia_result["astrometric_excess_noise"]):
                 aen = gaia_result["astrometric_excess_noise"]
                 aen_sig = gaia_result["astrometric_excess_noise_sig"]
-                print(
-                    f"Astrometric excess noise (mas) = {aen:.4f} +/- {aen/aen_sig:.4f}"
-                )
+
+                if self.verbose:
+                    print(
+                        f"Astrometric excess noise (mas) = {aen:.4f} +/- {aen/aen_sig:.4f}"
+                    )
 
         if "non_single_star" in gaia_result.columns:
             if not np.ma.is_masked(gaia_result["non_single_star"]):
-                print(f"Non single star = {gaia_result['non_single_star']}")
+                if self.verbose:
+                    print(f"Non single star = {gaia_result['non_single_star']}")
 
         return [ra, dec, parallax, pmra, pmdec, phot_g_mean_mag]
 
     @beartype
     def retrieve_data(
         self,
-        source_id: typing.Optional[typing.Union[int, str]] = None,
+        source_id: typing.Optional[typing.Union[int, np.int64, str]] = None,
         exclude_outliers: bool = True,
         combine_ccds: bool = False,
     ) -> None:
@@ -830,7 +865,8 @@ class EpochAstrometry(ExoGaia):
 
         self.query_source(source_id, gaia_release=self.gaia_release)
 
-        self.print_section("Retrieving epoch astrometry")
+        if self.verbose:
+            self.print_section("Retrieving epoch astrometry")
 
         self.source_id = source_id
 
@@ -840,8 +876,9 @@ class EpochAstrometry(ExoGaia):
                 "the future DR4 and DR5 data releases."
             )
 
-        print(f"Gaia release: {self.gaia_release}")
-        print(f"Source ID: {self.source_id}")
+        if self.verbose:
+            print(f"Gaia release: {self.gaia_release}")
+            print(f"Source ID: {self.source_id}")
 
         gaia_tables = [
             "epoch_astrometry",
@@ -851,7 +888,8 @@ class EpochAstrometry(ExoGaia):
         ]
 
         for table_item in gaia_tables:
-            print(f"\nTable: gaia{self.gaia_release.lower()}.{table_item}")
+            if self.verbose:
+                print(f"\nTable: gaia{self.gaia_release.lower()}.{table_item}")
 
             # Query Gaia source ID in NSS tables for selected Gaia source ID
 
@@ -869,13 +907,15 @@ class EpochAstrometry(ExoGaia):
 
             gaia_result = gaia_job.get_results()
 
-            if len(gaia_result) > 0:
-                print("\nTable parameters:")
-                for param_item in gaia_result[0].columns:
-                    print(f"   - {param_item} = {gaia_result[0][param_item]}")
+            if self.verbose:
+                if len(gaia_result) > 0:
+                    print("\nTable parameters:")
+                    for param_item in gaia_result[0].columns:
+                        print(f"   - {param_item} = {gaia_result[0][param_item]}")
 
             else:
-                print(f"\nSource not found in {table_item}")
+                if self.verbose:
+                    print(f"\nSource not found in {table_item}")
 
             if exclude_outliers:
                 pass
@@ -917,7 +957,8 @@ class EpochAstrometry(ExoGaia):
 
         _ = self.query_source(source_id=self.source_id, gaia_release="DR3")
 
-        self.print_section("Gaia BH3 epoch data")
+        if self.verbose:
+            self.print_section("Gaia BH3 epoch data")
 
         file_folder = Path(__file__).resolve().parent.parent
         data_file = file_folder / "data/gaiabh3_epochast.dat"
@@ -926,17 +967,19 @@ class EpochAstrometry(ExoGaia):
             self.ref_epoch = Time("2016.0", format="jyear", scale="tcb")
             self.time_end = Time("2017-05-28 08:44:00", scale="utc")
 
-        print(f"Gaia release: {self.gaia_release}")
-        print(f"Reference epoch: {self.ref_epoch}")
-        print(f"Source ID: {self.source_id}")
+        if self.verbose:
+            print(f"Gaia release: {self.gaia_release}")
+            print(f"Reference epoch: {self.ref_epoch}")
+            print(f"Source ID: {self.source_id}")
 
         if self.primary_mass is None:
             self.primary_mass = (0.76, 0.05)  # (Msun)
 
-        print(
-            f"\nPrimary mass (Msun): {self.primary_mass[0]:.2f} "
-            f"+/- {self.primary_mass[1]:.2f}"
-        )
+        if self.verbose:
+            print(
+                f"\nPrimary mass (Msun): {self.primary_mass[0]:.2f} "
+                f"+/- {self.primary_mass[1]:.2f}"
+            )
 
         self.data_table = pd.read_csv(
             data_file, sep=r"\s+", header="infer", comment="#", skip_blank_lines=True
@@ -1006,5 +1049,6 @@ class EpochAstrometry(ExoGaia):
                 "relative_time_year"
             ] * u.year.to(u.day)
 
-        print(f"\nData file: {data_file}")
-        print(f"Data shape: {self.data_table.shape}")
+        if self.verbose:
+            print(f"\nData file: {data_file}")
+            print(f"Data shape: {self.data_table.shape}")

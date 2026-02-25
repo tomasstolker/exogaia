@@ -35,6 +35,7 @@ class OccurrenceRate(ExoGaia):
         occ_rate: typing.Union[str, typing.Callable] = "cls_fulton2021",
         sma_range: typing.Tuple[Real, Real] = None,
         mass_range: typing.Tuple[Real, Real] = None,
+        verbose: bool = True,
     ) -> None:
         """
         Parameters
@@ -56,6 +57,8 @@ class OccurrenceRate(ExoGaia):
             Allowed companion mass range (Mjup) in case the argument
             of ``occ_rate`` is a callable. Otherwise, the argument
             can be left to ``None``.
+        verbose : bool
+            Print some information.
 
         Returns
         -------
@@ -63,7 +66,10 @@ class OccurrenceRate(ExoGaia):
             None
         """
 
-        self.print_section("Occurrence rate")
+        self.verbose = verbose
+
+        if self.verbose:
+            self.print_section("Occurrence rate")
 
         if isinstance(primary_mass, np.ndarray):
             self.primary_mass = primary_mass
@@ -104,24 +110,25 @@ class OccurrenceRate(ExoGaia):
             self.mass_range = mass_range
             self.occ_rate = occ_rate
 
-        print(f"Occurrence rate: {self.occ_rate.__name__}")
-        print("\nValid ranges:")
-        print(
-            f"   - Semi-major axis (au): {self.sma_range[0]:.2f} - {self.sma_range[1]:.2f}"
-        )
-        print(
-            f"   - Companion mass (Mjup): {self.mass_range[0]:.2f} - {self.mass_range[1]:.2f}"
-        )
-
-        if isinstance(self.primary_mass, Real):
-            print(f"\nPrimary mass (Msun): {primary_mass:.2f}")
-
-        else:
+        if self.verbose:
+            print(f"Occurrence rate: {self.occ_rate.__name__}")
+            print("\nValid ranges:")
             print(
-                "\nPrimary mass range (Msun): "
-                f"{np.min(primary_mass):.2f} - "
-                f"{np.max(primary_mass):.2f}"
+                f"   - Semi-major axis (au): {self.sma_range[0]:.2f} - {self.sma_range[1]:.2f}"
             )
+            print(
+                f"   - Companion mass (Mjup): {self.mass_range[0]:.2f} - {self.mass_range[1]:.2f}"
+            )
+
+            if isinstance(self.primary_mass, Real):
+                print(f"\nPrimary mass (Msun): {primary_mass:.2f}")
+
+            else:
+                print(
+                    "\nPrimary mass range (Msun): "
+                    f"{np.min(primary_mass):.2f} - "
+                    f"{np.max(primary_mass):.2f}"
+                )
 
         self.log_sma_edges = None
         self.log_mass_edges = None
@@ -316,9 +323,10 @@ class OccurrenceRate(ExoGaia):
             array has the same length as ``self.primary_mass``.
         """
 
-        self.print_section("Sample planets")
+        if self.verbose:
+            self.print_section("Sample planets")
 
-        print(f"Number of stars: {self.primary_mass.size}")
+            print(f"Number of stars: {self.primary_mass.size}")
 
         sma_list = np.full(self.primary_mass.size, np.nan)
         mass_list = np.full(self.primary_mass.size, np.nan)
@@ -374,21 +382,22 @@ class OccurrenceRate(ExoGaia):
                 sma_list[star_idx] = np.exp(log_sma)
                 mass_list[star_idx] = np.exp(log_mass)
 
-        print(f"Number of planets: {np.sum(~np.isnan(sma_list))}")
+        if self.verbose:
+            print(f"Number of planets: {np.sum(~np.isnan(sma_list))}")
 
-        if len(sma_list) == 1:
-            print(f"\nSemi-major axis (au) = {sma_list[0]:.2f}")
-            print(f"Companion mass (Mjup) = {mass_list[0]:.2f}")
+            if len(sma_list) == 1:
+                print(f"\nSemi-major axis (au) = {sma_list[0]:.2f}")
+                print(f"Companion mass (Mjup) = {mass_list[0]:.2f}")
 
-        elif len(sma_list) > 1:
-            print(
-                "\nSemi-major axis range (au) = "
-                f"{np.min(sma_list):.2f} - {np.max(sma_list):.2f}"
-            )
-            print(
-                "Companion mass range (Mjup) = "
-                f"{np.min(mass_list):.2f} - {np.max(mass_list):.2f}"
-            )
+            elif len(sma_list) > 1:
+                print(
+                    "\nSemi-major axis range (au) = "
+                    f"{np.min(sma_list):.2f} - {np.max(sma_list):.2f}"
+                )
+                print(
+                    "Companion mass range (Mjup) = "
+                    f"{np.min(mass_list):.2f} - {np.max(mass_list):.2f}"
+                )
 
         return sma_list, mass_list
 
@@ -421,7 +430,7 @@ class OccurrenceRate(ExoGaia):
         The original Fulton et al. (2021) relation is reported as the
         number of planets per 100 stars per Δln(a)=0.63 bin over the
         planet-mass range 30–6000 Earth masses.
-    
+
         The occurrence density is log-flat in planet mass within
         30–6000 M⊕, so it is independent of `mass_planet` and only
         depends on the semi-major axis and stellar mass.
