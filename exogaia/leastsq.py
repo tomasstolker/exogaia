@@ -8,16 +8,14 @@ from numbers import Real
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 
 from astropy import units as u
 from beartype import beartype, typing
 from matplotlib.gridspec import GridSpec
 from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
-from nsstools import NssSource
 from scipy.linalg import cho_factor, cho_solve
-from scipy.optimize import brentq, minimize, least_squares
+from scipy.optimize import minimize, least_squares
 from tqdm.auto import tqdm
 
 # from matplotlib import cm
@@ -26,7 +24,13 @@ from tqdm.auto import tqdm
 from exogaia.core import ExoGaia
 from exogaia.data import EpochAstrometry
 from exogaia.models import KeplerModel, StarModel
-from exogaia.utils import orbit_sky
+from exogaia.utils import (
+    calc_sma_from_ti,
+    calc_mass_from_sma,
+    param_list_to_dict,
+    orbit_sky,
+    thiele_innes_to_campbell,
+)
 
 
 class LeastSquares(ExoGaia):
@@ -539,10 +543,14 @@ class LeastSquares(ExoGaia):
         fig = None
 
         if plot_file is not None:
-            star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
+            model_param = param_list_to_dict(self.best_param)
+
+            star_model = StarModel(
+                epoch_astrometry=self.epoch_astrometry, verbose=False
+            )
 
             delta_ra_obs, delta_dec_obs, _ = star_model.calc_2d_model(
-                model_param=self.best_param, obs_time=None
+                model_param=model_param, obs_time=None
             )
 
             time_full = np.linspace(
@@ -550,7 +558,7 @@ class LeastSquares(ExoGaia):
             )
 
             delta_ra_full, delta_dec_full, _ = star_model.calc_2d_model(
-                model_param=self.best_param, obs_time=time_full
+                model_param=model_param, obs_time=time_full
             )
 
             fig, axs = plt.subplots(
@@ -775,10 +783,14 @@ class LeastSquares(ExoGaia):
         if plot_file is not None:
             # Stellar track
 
-            star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
+            model_param = param_list_to_dict(self.best_param)
+
+            star_model = StarModel(
+                epoch_astrometry=self.epoch_astrometry, verbose=False
+            )
 
             delta_ra_obs, delta_dec_obs, _ = star_model.calc_2d_model(
-                model_param=self.best_param, obs_time=None
+                model_param=model_param, obs_time=None
             )
 
             time_full = np.linspace(
@@ -786,20 +798,27 @@ class LeastSquares(ExoGaia):
             )
 
             delta_ra_full, delta_dec_full, _ = star_model.calc_2d_model(
-                model_param=self.best_param, obs_time=time_full
+                model_param=model_param, obs_time=time_full
             )
 
             # Stellar track, without acceleration
 
-            star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
+            param_no_accel = model_param.copy()
+
+            del param_no_accel["pm_dot_ra"]
+            del param_no_accel["pm_dot_dec"]
+
+            star_no_accel = StarModel(
+                epoch_astrometry=self.epoch_astrometry, verbose=False
+            )
 
             delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_2d_model(
-                model_param=self.best_param[:5], obs_time=None
+                model_param=param_no_accel, obs_time=None
             )
 
             delta_ra_no_accel_full, delta_dec_no_accel_full, _ = (
                 star_no_accel.calc_2d_model(
-                    model_param=self.best_param[:5], obs_time=time_full
+                    model_param=param_no_accel, obs_time=time_full
                 )
             )
 
@@ -1066,6 +1085,7 @@ class LeastSquares(ExoGaia):
             self.print_section("Binary star (9 parameters)")
 
         # Epoch astrometry data
+
         obs_time = self.data_table["obs_time_tcb"].to_numpy()
         obs_pos = self.data_table["centroid_pos_al"].to_numpy()
         obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
@@ -1075,6 +1095,7 @@ class LeastSquares(ExoGaia):
         par_fac = self.data_table["parallax_factor_al"].to_numpy()
 
         # Design matrix for least-squares fit
+
         design = np.column_stack(
             [
                 sin_scan_ang,
@@ -1137,10 +1158,14 @@ class LeastSquares(ExoGaia):
         if plot_file is not None:
             # Stellar track
 
-            star_model = StarModel(epoch_astrometry=self.epoch_astrometry)
+            model_param = param_list_to_dict(self.best_param)
+
+            star_model = StarModel(
+                epoch_astrometry=self.epoch_astrometry, verbose=False
+            )
 
             delta_ra_obs, delta_dec_obs, _ = star_model.calc_2d_model(
-                model_param=self.best_param, obs_time=None
+                model_param=model_param, obs_time=None
             )
 
             time_full = np.linspace(
@@ -1148,20 +1173,29 @@ class LeastSquares(ExoGaia):
             )
 
             delta_ra_full, delta_dec_full, _ = star_model.calc_2d_model(
-                model_param=self.best_param, obs_time=time_full
+                model_param=model_param, obs_time=time_full
             )
 
             # Stellar track, without acceleration
 
-            star_no_accel = StarModel(epoch_astrometry=self.epoch_astrometry)
+            param_no_accel = model_param.copy()
+
+            del param_no_accel["pm_dot_ra"]
+            del param_no_accel["pm_dot_dec"]
+            del param_no_accel["pm_dotdot_ra"]
+            del param_no_accel["pm_dotdot_dec"]
+
+            star_no_accel = StarModel(
+                epoch_astrometry=self.epoch_astrometry, verbose=False
+            )
 
             delta_ra_no_accel, delta_dec_no_accel, _ = star_no_accel.calc_2d_model(
-                model_param=self.best_param[:5], obs_time=None
+                model_param=param_no_accel, obs_time=None
             )
 
             delta_ra_no_accel_full, delta_dec_no_accel_full, _ = (
                 star_no_accel.calc_2d_model(
-                    model_param=self.best_param[:5], obs_time=time_full
+                    model_param=param_no_accel, obs_time=time_full
                 )
             )
 
@@ -1425,8 +1459,8 @@ class LeastSquares(ExoGaia):
             is created when the argument is set to ``None``.
         n_points : int
             Number of grid points in the period, eccentricity, and
-            epoch of periastron dimensions. The default is 50, so
-            calculating a grid with shape (50, 50, 50).
+            epoch of periastron dimensions. The default is 30, so
+            calculating a grid with shape (30, 30, 30).
 
         Returns
         -------
@@ -1437,9 +1471,7 @@ class LeastSquares(ExoGaia):
         self.print_section("Orbit grid (12-parameters)")
 
         # Epoch astrometry data
-        # obs_time = self.data_table["obs_time_tcb"].to_numpy()
         obs_pos = self.data_table["centroid_pos_al"].to_numpy()
-        # obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
         rel_yr = self.data_table["relative_time_year"].to_numpy()
         sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
         cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
@@ -1545,107 +1577,48 @@ class LeastSquares(ExoGaia):
         # plt.close()
 
         # Uncorrelated uncertainties
+
         global_sigma = np.sqrt(np.diag(global_cov))
 
-        # Convert Thiele-Innes constants into
-        # semi-major axis of the photocenter, a0
-        # See equation A.2 in Halbwachs et al. (2023)
+        # Calculate the semi-major axis of the photocenter (mas)
 
-        # u = (A^2 + B^2 + F^2 + G^2) / 2
-        # v = AG - BF
-        # a = sqrt(u + sqrt((u+v)(u-v)))
+        sma_0, sma_0_sigma = calc_sma_from_ti(global_param, global_cov)
 
-        u_param = (
-            global_param[5] ** 2
-            + global_param[6] ** 2
-            + global_param[7] ** 2
-            + global_param[8] ** 2
-        ) / 2.0
+        # Calculate companion mass (Msun)
 
-        v_param = global_param[5] * global_param[8] - global_param[6] * global_param[7]
-
-        # All components in the 1D position of eta are in mas
-        # Therefore, also the Thiele-Innes components
-
-        sma_0 = np.sqrt(u_param + np.sqrt((u_param + v_param) * (u_param - v_param)))
-
-        # Propagate uncertainties from Thiele-Innes constants to sma_0
-        # Gradient of sma_0 to u and v
-
-        w_param = np.sqrt(u_param**2 - v_param**2)
-        da_du = np.sqrt(w_param + u_param) / (2.0 * w_param)
-        da_dv = -v_param / (2.0 * w_param * np.sqrt(w_param + u_param))
-
-        du_dA = global_param[5]  # A
-        du_dB = global_param[6]  # B
-        du_dF = global_param[7]  # F
-        du_dG = global_param[8]  # G
-
-        dv_dA = global_param[8]  # G
-        dv_dB = -global_param[7]  # -F
-        dv_dF = -global_param[6]  # -B
-        dv_dG = global_param[5]  # A
-
-        grad_a = np.array(
-            [
-                da_du * du_dA + da_dv * dv_dA,
-                da_du * du_dB + da_dv * dv_dB,
-                da_du * du_dF + da_dv * dv_dF,
-                da_du * du_dG + da_dv * dv_dG,
-            ]
+        f_mass, mass_2 = calc_mass_from_sma(
+            sma_0, global_param[9], global_param[2], self.primary_mass[0]
         )
 
-        # global_cov[5:, 5:] are covariances of the
-        # Thiele-Innes constants in the order A, B, F, G
-        # TODO Double check if the calculation is correct
-        # The uncertainty on sma_0 seems a bit small?
-
-        sma_0_sigma = np.sqrt(grad_a @ global_cov[5:, 5:] @ grad_a)
-
-        # Calculate mass function (Msun)
-        # See equation 1 in Halbwachs et al. (2023)
-        # global_param[2] = parallax (mas)
-        # global_param[9] = period (days)
-
-        f_mass = (sma_0 / global_param[2]) ** 3 / (global_param[9] / 365.25) ** 2
-
-        # Companion mass (Msun)
-        # See equation 2 in Gaia colab (2025) on Gaia BH3
-        # f_mass = M2 (M2/(M1+M2))**2
-
-        def find_root(mass_2):
-            return mass_2**3 / (self.primary_mass[0] + mass_2) ** 2 - f_mass
-
-        mass_2 = brentq(find_root, 0.0, 100.0 * self.primary_mass[0])
-
         # Relative semi-major axis (i.e. a = a1 + a2) in mas
+        # Primary and companion masses in Msun
+        # global_param[9] = period
 
-        sma = ((period / 365.25) ** 2 * (self.primary_mass[0] + mass_2)) ** (1.0 / 3.0)
-        sma /= global_param[2]  # (mas) -> (au)
-
-        # Convert from Msun to Mjup
-
-        f_mass_jup = ((f_mass * u.M_sun).to(u.M_jup)).value
-        mass_2_jup = ((mass_2 * u.M_sun).to(u.M_jup)).value
+        sma = ((global_param[9] / 365.25) ** 2 * (self.primary_mass[0] + mass_2)) ** (
+            1.0 / 3.0
+        )
 
         # Print best-fit parameters
 
         print(f"\nBest-fit RUWE = {global_ruwe:.3f}")
 
-        print("\nStellar track:")
+        print("\nBest-fit stellar track:")
         print(f"   - RA offset (mas) = {global_param[0]:.3f} +/- {global_sigma[0]:.3f}")
         print(
-            f"   - Dec offset (mas) = {global_param[1]:.3f} +/- {global_sigma[1]:.3f}"
+            f"   - Dec offset (mas) = {global_param[1]:.3f} "
+            f"+/- {global_sigma[1]:.3f}"
         )
         print(f"   - Parallax (mas) = {global_param[2]:.3f} +/- {global_sigma[2]:.3f}")
         print(
-            f"   - mu in RA (mas/yr) = {global_param[3]:.3f} +/- {global_sigma[3]:.3f}"
+            f"   - mu in RA (mas/yr) = {global_param[3]:.3f} "
+            f"+/- {global_sigma[3]:.3f}"
         )
         print(
-            f"   - mu in Dec (mas/yr) = {global_param[4]:.3f} +/- {global_sigma[4]:.3f}"
+            f"   - mu in Dec (mas/yr) = {global_param[4]:.3f} "
+            f"+/- {global_sigma[4]:.3f}"
         )
 
-        print("\nThiele-Innes elements:")
+        print("\nBest-fit orbit:")
         print(f"   - Period (days) = {global_param[9]:.3f}")
         print(f"   - Eccentricity = {global_param[10]:.3f}")
         print(f"   - Relative time of periastron = {global_param[11]:.2f}")
@@ -1656,11 +1629,12 @@ class LeastSquares(ExoGaia):
 
         print("\nDerived parameters:")
         print(
-            f"   - Semi-major axis of photocenter (mas) = {sma_0:.3f} +/- {sma_0_sigma:.3f}"
+            "   - Semi-major axis of photocenter (mas) "
+            f"= {sma_0:.3f} +/- {sma_0_sigma:.3f}"
         )
         print(f"   - Relative semi-major axis (au) = {sma:.3f}")
-        print(f"   - Mass function (Mjup) = {f_mass_jup:.3e}")
-        print(f"   - Companion mass (Mjup) = {mass_2_jup:.3f}")
+        print(f"   - Mass function (Msun) = {f_mass:.3e}")
+        print(f"   - Companion mass (Msun) = {mass_2:.3e}")
 
         # Select minimum RUWE along the 3rd axis to create a 2D array
 
@@ -1740,67 +1714,8 @@ class LeastSquares(ExoGaia):
         if plot_file is not None:
             plt.savefig(plot_file)
 
-        orb_data = {
-            "source_id": [self.epoch_astrometry.source_id],
-            "nss_solution_type": ["Orbital"],
-            "corr_vec": [[]],
-            "ra": [global_param[0]],
-            "ra_error": [np.nan],
-            "dec": [global_param[1]],
-            "dec_error": [np.nan],
-            "parallax": [global_param[2]],
-            "parallax_error": [np.nan],
-            "pmra": [global_param[3]],
-            "pmra_error": [np.nan],
-            "pmdec": [global_param[4]],
-            "pmdec_error": [np.nan],
-            "a_thiele_innes": [global_param[5]],
-            "a_thiele_innes_error": [np.nan],
-            "b_thiele_innes": [global_param[6]],
-            "b_thiele_innes_error": [np.nan],
-            "f_thiele_innes": [global_param[7]],
-            "f_thiele_innes_error": [np.nan],
-            "g_thiele_innes": [global_param[8]],
-            "g_thiele_innes_error": [np.nan],
-            "c_thiele_innes": [np.nan],
-            "c_thiele_innes_error": [np.nan],
-            "h_thiele_innes": [np.nan],
-            "h_thiele_innes_error": [np.nan],
-            "period": [global_param[9]],
-            "period_error": [np.nan],
-            "eccentricity": [global_param[10]],
-            "eccentricity_error": [np.nan],
-            "t_periastron": [global_param[11]],
-            "t_periastron_error": [np.nan],
-        }
-
-        df_in = pd.DataFrame(orb_data)
-
-        nss_source = NssSource(star=df_in, indice=0)
-        df_campbell = nss_source.campbell()
-
-        print("\nCampbell elements:")
-        print(f"   - Period = {global_param[9]:.3f} days")
-        print(f"   - Eccentricity = {global_param[10]:.3f}")
-        print(f"   - Relative time of periastron = {global_param[11]:.3f}")
-        print(f"   - Semi-major axis of photocenter (mas) = {sma_0:.3f}")
-        print(f"   - Inclination (deg) = {df_campbell['inclination'][0]:.3f}")
-        print(
-            f"   - Argument of periastron (deg) = {df_campbell['arg_periastron'][0]:.3f}"
-        )
-        print(f"   - PA of ascending node (deg) = {df_campbell['nodeangle'][0]:.3f}")
-
-        self.best_param = np.hstack(
-            [
-                global_param[:5],  # [delta_RA, delta_dec, par, mu_RA, mu_Dec]
-                global_param[9],  # per (days)
-                global_param[10],  # ecc
-                global_param[11],  # tau
-                sma_0,  # a_0 (mas)
-                np.radians(df_campbell["inclination"][0]),  # inc (rad)
-                np.radians(df_campbell["arg_periastron"][0]),  # aop (rad)
-                np.radians(df_campbell["nodeangle"][0]),  # pan (rad)
-            ]
+        self.best_param = thiele_innes_to_campbell(
+            self.epoch_astrometry.source_id, sma_0, global_param
         )
 
         self.best_model = global_model
@@ -1848,10 +1763,11 @@ class LeastSquares(ExoGaia):
 
         Returns
         -------
-        Figure
+        Figure, None
             Matplotlib ``Figure`` object containing the orbit fit and
             astrometric residuals. A ``None`` is returned if the
-            argument of ``plot_file`` if ``False``.
+            argument of ``plot_file`` if ``False`` or if the
+            fit did not converge.
         """
 
         if self.best_param is None or len(self.best_param) != 12:
@@ -1945,15 +1861,17 @@ class LeastSquares(ExoGaia):
 
             if inc_jitter:
                 var = obs_err**2 + params[-1] ** 2  # (mas^2)
-                model_param = params[:-1]
+                param_list = params[:-1]
 
             else:
                 var = obs_err**2  # (mas^2)
-                model_param = params
+                param_list = params
 
             kepler_model = KeplerModel(
                 epoch_astrometry=self.epoch_astrometry, verbose=False
             )
+
+            model_param = param_list_to_dict(param_list)
 
             # We construct residuals such that least_squares minimizes
             # the full Gaussian negative log-likelihood:
@@ -1980,14 +1898,29 @@ class LeastSquares(ExoGaia):
             like_residuals, fit_param, args=(obs_err,), bounds=bounds
         )
 
-        print(f"Number of function evaluations: {result.nfev}")
-        print(f"Number of Jacobian evaluations: {result.njev}")
+        self.fit_success = result.success
 
         if result.success:
             self.best_param = result.x
 
             self.param_cov = np.linalg.inv(result.jac.T @ result.jac)
             param_sig = np.sqrt(np.diag(self.param_cov))
+
+            # Calculate companion mass (Msun)
+
+            f_mass, mass_2 = calc_mass_from_sma(
+                sma_0=self.best_param[8],
+                period=self.best_param[5],
+                parallax=self.best_param[2],
+                primary_mass=self.primary_mass[0],
+            )
+
+            # Relative semi-major axis (i.e. a = a1 + a2) in mas
+            # Primary and companion masses in Msun
+
+            sma = (
+                (self.best_param[5] / 365.25) ** 2 * (self.primary_mass[0] + mass_2)
+            ) ** (1.0 / 3.0)
 
             # Degrees of freedom = n_data - n_param
             dof = result.jac.shape[0] - result.jac.shape[1]
@@ -1997,7 +1930,7 @@ class LeastSquares(ExoGaia):
             # generated/scipy.optimize.least_squares.html
             self.chi2 = 2.0 * result.cost
             self.chi2_red = self.chi2 / dof
-            print(f"\nReduced chi^2: {self.chi2_red:.3f}")
+            print(f"Reduced chi^2: {self.chi2_red:.3f}")
 
             if self.epoch_astrometry.sim_data:
                 self.ruwe = np.sqrt(self.chi2_red)
@@ -2006,7 +1939,7 @@ class LeastSquares(ExoGaia):
 
             print(f"RUWE: {self.ruwe:.3f}")
 
-            print("\nBest-fit parameters:")
+            print("\nBest-fit stellar track:")
 
             print(
                 "   - RA offset (mas) = "
@@ -2038,6 +1971,8 @@ class LeastSquares(ExoGaia):
                 f"+/- {param_sig[4]:.3f}"
             )
 
+            print("\nBest-fit orbit:")
+
             print(
                 "   - Period (days) = "
                 f"{self.best_param[5]:.3f} "
@@ -2057,7 +1992,7 @@ class LeastSquares(ExoGaia):
             )
 
             print(
-                "   - Semi-major axis (mas) = "
+                "   - Semi-major axis of photocenter (mas) = "
                 f"{self.best_param[8]:.3f} "
                 f"+/- {param_sig[8]:.3f}"
             )
@@ -2087,332 +2022,354 @@ class LeastSquares(ExoGaia):
                     f"+/- {param_sig[12]:.3f}"
                 )
 
-        else:
-            warnings.warn(f"The fit was not successful: {result.message}")
+            print(f"\nNumber of function evaluations: {result.nfev}")
+            print(f"Number of Jacobian evaluations: {result.njev}")
 
-        if inc_jitter:
-            # Remove the jitter parameter
-            self.best_param = self.best_param[:-1]
+            print("\nDerived parameters:")
+            print(f"   - Relative semi-major axis (au) = {sma:.3f}")
+            print(f"   - Mass function (Msun) = {f_mass:.3e}")
+            print(f"   - Companion mass (Msun) = {mass_2:.3e}")
 
-        fig = None
+            if inc_jitter:
+                # Remove the jitter parameter
+                self.best_param = self.best_param[:-1]
 
-        if plot_file is not None:
-            # Stellar track + orbit model
+            fig = None
 
-            kepler_model = KeplerModel(
-                epoch_astrometry=self.epoch_astrometry, verbose=False
-            )
+            if plot_file is not None:
+                # Stellar track + orbit model
 
-            delta_ra_obs, delta_dec_obs = kepler_model.calc_2d_model(
-                model_param=self.best_param, obs_time=None
-            )
+                model_param = param_list_to_dict(self.best_param)
 
-            obs_time_full = np.linspace(
-                self.time_start.tcb.jyear, self.time_end.tcb.jyear, 1000
-            )
-
-            delta_ra_full, delta_dec_full = kepler_model.calc_2d_model(
-                model_param=self.best_param, obs_time=obs_time_full
-            )
-
-            # Orbit-only model
-
-            delta_ra_orbit, delta_dec_orbit = kepler_model.calc_orbit(
-                model_param=self.best_param, obs_time=None
-            )
-
-            yr_start = self.ref_epoch
-            yr_end = self.ref_epoch + (self.best_param[5] / 365.25) * u.yr
-
-            obs_time_full = np.linspace(yr_start, yr_end, 1000)
-            obs_time_full = obs_time_full.tcb.jyear
-
-            delta_ra_orbit_full, delta_dec_orbit_full = kepler_model.calc_orbit(
-                model_param=self.best_param, obs_time=obs_time_full
-            )
-
-            # Calculate residuals of best-fit model
-
-            residuals = kepler_model.calc_residuals(model_param=self.best_param)
-
-            res_ra, res_dec = (
-                sin_scan_ang * residuals,
-                cos_scan_ang * residuals,
-            )
-
-            # Create plot with residuals
-
-            fig, axs = plt.subplots(1, 3, figsize=(18, 4), gridspec_kw={"wspace": 0.25})
-
-            # axs[0].set_aspect("equal", adjustable="box")
-            # axs[1].set_aspect("equal", adjustable="box")
-
-            axs[0].plot(
-                delta_ra_full,
-                delta_dec_full,
-                ls="-",
-                lw=1.5,
-                marker="none",
-                color="black",
-            )
-
-            axs[0].plot(
-                delta_ra_obs[0] + res_ra[0],
-                delta_dec_obs[0] + res_dec[0],
-                ls="none",
-                marker="s",
-                ms=5.0,
-                mew=1.2,
-                color="tab:green",
-                mec="black",
-                zorder=3,
-            )
-
-            axs[0].plot(
-                delta_ra_obs[1:-1] + res_ra[1:-1],
-                delta_dec_obs[1:-1] + res_dec[1:-1],
-                ls="none",
-                marker="s",
-                ms=5.0,
-                mew=1.2,
-                color="tab:purple",
-                mec="black",
-                zorder=2,
-            )
-
-            axs[0].plot(
-                delta_ra_obs[-1] + res_ra[-1],
-                delta_dec_obs[-1] + res_dec[-1],
-                ls="none",
-                marker="s",
-                ms=5.0,
-                mew=1.2,
-                color="tab:red",
-                mec="black",
-                zorder=3,
-            )
-
-            axs[0].set_title(
-                rf"$\Delta$RA = {self.best_param[0]:.3f} mas $\pm$ {param_sig[0]:.3f} mas"
-                + "\n"
-                rf"$\Delta$Dec = {self.best_param[1]:.3f} mas $\pm$ {param_sig[1]:.3f} mas"
-                + "\n"
-                rf"$\varpi$ = {self.best_param[2]:.3f} $\pm$ {param_sig[2]:.3f} mas"
-                + "\n"
-                rf"$\mu_\mathrm{{RA}}$ = {self.best_param[3]:.3f} $\pm$ {param_sig[3]:.3f} mas/yr"
-                + "\n"
-                rf"$\mu_\mathrm{{Dec}}$ = {self.best_param[4]:.3f} $\pm$ {param_sig[4]:.3f} mas/yr"
-            )
-
-            axs[0].set_xlabel(r"$\Delta\alpha$ (mas)")
-            axs[0].set_ylabel(r"$\Delta\delta$ (mas)")
-            axs[0].invert_xaxis()
-
-            axs[1].plot(
-                delta_ra_orbit_full,
-                delta_dec_orbit_full,
-                ls="-",
-                lw=1.5,
-                marker="none",
-                color="black",
-            )
-
-            for i, res_item in enumerate(residuals):
-                if i == 0:
-                    color = "tab:green"
-                    zorder = 3
-
-                elif i == len(residuals) - 1:
-                    color = "tab:red"
-                    zorder = 3
-
-                else:
-                    color = "tab:purple"
-                    zorder = 2
-
-                x1 = delta_ra_orbit[i] + sin_scan_ang[i] * (res_item + obs_err[i])
-                x2 = delta_ra_orbit[i] + sin_scan_ang[i] * (res_item - obs_err[i])
-                y1 = delta_dec_orbit[i] + cos_scan_ang[i] * (res_item + obs_err[i])
-                y2 = delta_dec_orbit[i] + cos_scan_ang[i] * (res_item - obs_err[i])
-
-                axs[1].plot(
-                    [x1, x2],
-                    [y1, y2],
-                    "-",
-                    lw=1,
-                    color=color,
-                    zorder=zorder,
+                kepler_model = KeplerModel(
+                    epoch_astrometry=self.epoch_astrometry, verbose=False
                 )
 
-            axs[1].plot(
-                (delta_ra_orbit + res_ra)[0],
-                (delta_dec_orbit + res_dec)[0],
-                ls="none",
-                marker="s",
-                ms=5.0,
-                mew=1.2,
-                color="tab:green",
-                mec="black",
-                zorder=3,
-            )
+                delta_ra_obs, delta_dec_obs = kepler_model.calc_2d_model(
+                    model_param=model_param, obs_time=None
+                )
 
-            axs[1].plot(
-                (delta_ra_orbit + res_ra)[1:-1],
-                (delta_dec_orbit + res_dec)[1:-1],
-                ls="none",
-                marker="s",
-                ms=5.0,
-                mew=1.2,
-                color="tab:purple",
-                mec="black",
-                zorder=2,
-            )
+                obs_time_full = np.linspace(
+                    self.time_start.tcb.jyear, self.time_end.tcb.jyear, 1000
+                )
 
-            axs[1].plot(
-                (delta_ra_orbit + res_ra)[-1],
-                (delta_dec_orbit + res_dec)[-1],
-                ls="none",
-                marker="s",
-                ms=5.0,
-                mew=1.2,
-                color="tab:red",
-                mec="black",
-                zorder=3,
-            )
+                delta_ra_full, delta_dec_full = kepler_model.calc_2d_model(
+                    model_param=model_param, obs_time=obs_time_full
+                )
 
-            axs[1].plot(
-                0.0,
-                0.0,
-                marker="x",
-                ms=5.0,
-                mew=1.5,
-                ls="none",
-                color="tab:gray",
-                mec="tab:gray",
-                zorder=3,
-                label="Barycenter",
-            )
+                # Orbit-only model
 
-            # Time of periastron in Julian years
-            t_per = (
-                self.ref_epoch.value
-                + (self.best_param[5] * self.best_param[7]) / 365.25
-            )
+                delta_ra_orbit, delta_dec_orbit = kepler_model.calc_orbit(
+                    model_param=model_param,
+                    obs_time=None,
+                )
 
-            delta_ra_per, delta_dec_per = kepler_model.calc_orbit(
-                self.best_param, obs_time=np.array([t_per])
-            )
+                yr_start = self.ref_epoch
+                yr_end = self.ref_epoch + (self.best_param[5] / 365.25) * u.yr
 
-            axs[1].plot(
-                delta_ra_per,
-                delta_dec_per,
-                marker="+",
-                ms=5.0,
-                mew=1.5,
-                ls="none",
-                color="tab:olive",
-                zorder=3,
-                label=rf"Periastron ($t_\mathrm{{per}} = {t_per:.2f}$)",
-            )
+                obs_time_full = np.linspace(yr_start, yr_end, 10000)
+                obs_time_full = obs_time_full.tcb.jyear
 
-            x_nodes, y_nodes = orbit_sky(
-                nu=np.array([self.best_param[10], np.pi + self.best_param[10]]),
-                sma=self.best_param[8],
-                ecc=self.best_param[6],
-                inc=self.best_param[9],
-                aop=self.best_param[10],
-                pan=self.best_param[11],
-            )
+                delta_ra_orbit_full, delta_dec_orbit_full = kepler_model.calc_orbit(
+                    model_param=model_param,
+                    obs_time=obs_time_full,
+                )
 
-            axs[1].plot(
-                x_nodes,
-                y_nodes,
-                ls=":",
-                lw=1,
-                marker="none",
-                color="tab:gray",
-                label="Line of nodes",
-            )
+                # Calculate residuals of best-fit model
 
-            axs[1].set_title(
-                rf"$P = {self.best_param[5]:.3f} \pm "
-                rf"{param_sig[5]:.3f}\ \mathrm{{days}}$" + "\n"
-                rf"$e = {self.best_param[6]:.3f} \pm "
-                rf"{param_sig[6]:.3f}$" + "\n"
-                rf"$\tau = {self.best_param[7]:.3f} \pm "
-                rf"{param_sig[7]:.3f}$" + "\n"
-                rf"$a_0 = {self.best_param[8]:.3f} \pm "
-                rf"{param_sig[8]:.3f}\ \mathrm{{mas}}$" + "\n"
-                rf"$i = {np.degrees(self.best_param[9]):.3f} \pm "
-                rf"{np.degrees(param_sig[9]):.3f}\ \mathrm{{deg}}$" + "\n"
-                rf"$\omega = {np.degrees(self.best_param[10]):.3f} \pm "
-                rf"{np.degrees(param_sig[10]):.3f}\ \mathrm{{deg}}$" + "\n"
-                rf"$\Omega = {np.degrees(self.best_param[11]):.3f} \pm "
-                rf"{np.degrees(param_sig[11]):.3f}\ \mathrm{{deg}}$"
-            )
+                residuals = kepler_model.calc_residuals(model_param)
 
-            axs[1].set_xlabel(r"$\Delta\alpha$ (mas)")
-            axs[1].set_ylabel(r"$\Delta\delta$ (mas)")
-            axs[1].invert_xaxis()
-            axs[1].legend(loc="upper left", frameon=False, fontsize=8)
+                res_ra, res_dec = (
+                    sin_scan_ang * residuals,
+                    cos_scan_ang * residuals,
+                )
 
-            axs[2].errorbar(
-                obs_time[0],
-                residuals[0],
-                yerr=obs_err[0],
-                ls="none",
-                marker="s",
-                ms=5.0,
-                mew=1.2,
-                elinewidth=1.2,
-                color="tab:green",
-                ecolor="black",
-                mec="black",
-                zorder=3,
-            )
+                # Create plot with residuals
 
-            axs[2].errorbar(
-                obs_time[1:-1],
-                residuals[1:-1],
-                yerr=obs_err[1:-1],
-                ls="none",
-                marker="s",
-                ms=5.0,
-                mew=1.2,
-                elinewidth=1.2,
-                color="tab:purple",
-                ecolor="black",
-                mec="black",
-                zorder=2,
-            )
+                fig, axs = plt.subplots(
+                    1, 3, figsize=(18, 4), gridspec_kw={"wspace": 0.25}
+                )
 
-            axs[2].errorbar(
-                obs_time[-1],
-                residuals[-1],
-                yerr=obs_err[-1],
-                ls="none",
-                marker="s",
-                ms=5.0,
-                mew=1.2,
-                elinewidth=1.2,
-                color="tab:red",
-                ecolor="black",
-                mec="black",
-                zorder=3,
-            )
+                # axs[0].set_aspect("equal", adjustable="box")
+                # axs[1].set_aspect("equal", adjustable="box")
 
-            axs[2].set_xlabel("Time (yr)")
-            axs[2].set_ylabel("Residuals (mas)")
-            axs[2].text(
-                0.04,
-                0.92,
-                f"RUWE = {self.ruwe:.3f}",
-                ha="left",
-                va="center",
-                transform=axs[2].transAxes,
-                fontsize=12,
-            )
+                axs[0].plot(
+                    delta_ra_full,
+                    delta_dec_full,
+                    ls="-",
+                    lw=1.5,
+                    marker="none",
+                    color="black",
+                )
 
-            plt.savefig(plot_file)
+                axs[0].plot(
+                    delta_ra_obs[0] + res_ra[0],
+                    delta_dec_obs[0] + res_dec[0],
+                    ls="none",
+                    marker="s",
+                    ms=5.0,
+                    mew=1.2,
+                    color="tab:green",
+                    mec="black",
+                    zorder=3,
+                )
+
+                axs[0].plot(
+                    delta_ra_obs[1:-1] + res_ra[1:-1],
+                    delta_dec_obs[1:-1] + res_dec[1:-1],
+                    ls="none",
+                    marker="s",
+                    ms=5.0,
+                    mew=1.2,
+                    color="tab:purple",
+                    mec="black",
+                    zorder=2,
+                )
+
+                axs[0].plot(
+                    delta_ra_obs[-1] + res_ra[-1],
+                    delta_dec_obs[-1] + res_dec[-1],
+                    ls="none",
+                    marker="s",
+                    ms=5.0,
+                    mew=1.2,
+                    color="tab:red",
+                    mec="black",
+                    zorder=3,
+                )
+
+                axs[0].set_title(
+                    rf"$\Delta$RA = {self.best_param[0]:.3f} mas "
+                    rf"$\pm$ {param_sig[0]:.3f} mas"
+                    "\n"
+                    rf"$\Delta$Dec = {self.best_param[1]:.3f} mas "
+                    rf"$\pm$ {param_sig[1]:.3f} mas"
+                    "\n"
+                    rf"$\varpi$ = {self.best_param[2]:.3f} "
+                    rf"$\pm$ {param_sig[2]:.3f} mas"
+                    "\n"
+                    rf"$\mu_\mathrm{{RA}}$ = {self.best_param[3]:.3f} "
+                    rf"$\pm$ {param_sig[3]:.3f} mas/yr"
+                    "\n"
+                    rf"$\mu_\mathrm{{Dec}}$ = {self.best_param[4]:.3f} "
+                    rf"$\pm$ {param_sig[4]:.3f} mas/yr"
+                )
+
+                axs[0].set_xlabel(r"$\Delta\alpha$ (mas)")
+                axs[0].set_ylabel(r"$\Delta\delta$ (mas)")
+                axs[0].invert_xaxis()
+
+                axs[1].plot(
+                    delta_ra_orbit_full,
+                    delta_dec_orbit_full,
+                    ls="-",
+                    lw=1.5,
+                    marker="none",
+                    color="black",
+                )
+
+                for i, res_item in enumerate(residuals):
+                    if i == 0:
+                        color = "tab:green"
+                        zorder = 3
+
+                    elif i == len(residuals) - 1:
+                        color = "tab:red"
+                        zorder = 3
+
+                    else:
+                        color = "tab:purple"
+                        zorder = 2
+
+                    x1 = delta_ra_orbit[i] + sin_scan_ang[i] * (res_item + obs_err[i])
+                    x2 = delta_ra_orbit[i] + sin_scan_ang[i] * (res_item - obs_err[i])
+                    y1 = delta_dec_orbit[i] + cos_scan_ang[i] * (res_item + obs_err[i])
+                    y2 = delta_dec_orbit[i] + cos_scan_ang[i] * (res_item - obs_err[i])
+
+                    axs[1].plot(
+                        [x1, x2],
+                        [y1, y2],
+                        "-",
+                        lw=1,
+                        color=color,
+                        zorder=zorder,
+                    )
+
+                axs[1].plot(
+                    (delta_ra_orbit + res_ra)[0],
+                    (delta_dec_orbit + res_dec)[0],
+                    ls="none",
+                    marker="s",
+                    ms=5.0,
+                    mew=1.2,
+                    color="tab:green",
+                    mec="black",
+                    zorder=3,
+                )
+
+                axs[1].plot(
+                    (delta_ra_orbit + res_ra)[1:-1],
+                    (delta_dec_orbit + res_dec)[1:-1],
+                    ls="none",
+                    marker="s",
+                    ms=5.0,
+                    mew=1.2,
+                    color="tab:purple",
+                    mec="black",
+                    zorder=2,
+                )
+
+                axs[1].plot(
+                    (delta_ra_orbit + res_ra)[-1],
+                    (delta_dec_orbit + res_dec)[-1],
+                    ls="none",
+                    marker="s",
+                    ms=5.0,
+                    mew=1.2,
+                    color="tab:red",
+                    mec="black",
+                    zorder=3,
+                )
+
+                axs[1].plot(
+                    0.0,
+                    0.0,
+                    marker="x",
+                    ms=5.0,
+                    mew=1.5,
+                    ls="none",
+                    color="tab:gray",
+                    mec="tab:gray",
+                    zorder=3,
+                    label="Barycenter",
+                )
+
+                # Time of periastron in Julian years
+                t_per = (
+                    self.ref_epoch.value
+                    + (self.best_param[5] * self.best_param[7]) / 365.25
+                )
+
+                delta_ra_per, delta_dec_per = kepler_model.calc_orbit(
+                    model_param,
+                    obs_time=np.array([t_per]),
+                )
+
+                axs[1].plot(
+                    delta_ra_per,
+                    delta_dec_per,
+                    marker="+",
+                    ms=5.0,
+                    mew=1.5,
+                    ls="none",
+                    color="tab:olive",
+                    zorder=3,
+                    label=rf"Periastron ($t_\mathrm{{per}} = {t_per:.2f}$)",
+                )
+
+                x_nodes, y_nodes = orbit_sky(
+                    nu=np.array([self.best_param[10], np.pi + self.best_param[10]]),
+                    sma=self.best_param[8],
+                    ecc=self.best_param[6],
+                    inc=self.best_param[9],
+                    aop=self.best_param[10],
+                    pan=self.best_param[11],
+                )
+
+                axs[1].plot(
+                    x_nodes,
+                    y_nodes,
+                    ls=":",
+                    lw=1,
+                    marker="none",
+                    color="tab:gray",
+                    label="Line of nodes",
+                )
+
+                axs[1].set_title(
+                    rf"$P = {self.best_param[5]:.3f} \pm "
+                    rf"{param_sig[5]:.3f}\ \mathrm{{days}}$" + "\n"
+                    rf"$e = {self.best_param[6]:.3f} \pm "
+                    rf"{param_sig[6]:.3f}$" + "\n"
+                    rf"$\tau = {self.best_param[7]:.3f} \pm "
+                    rf"{param_sig[7]:.3f}$" + "\n"
+                    rf"$a_0 = {self.best_param[8]:.3f} \pm "
+                    rf"{param_sig[8]:.3f}\ \mathrm{{mas}}$" + "\n"
+                    rf"$i = {np.degrees(self.best_param[9]):.3f} \pm "
+                    rf"{np.degrees(param_sig[9]):.3f}\ \mathrm{{deg}}$" + "\n"
+                    rf"$\omega = {np.degrees(self.best_param[10]):.3f} \pm "
+                    rf"{np.degrees(param_sig[10]):.3f}\ \mathrm{{deg}}$" + "\n"
+                    rf"$\Omega = {np.degrees(self.best_param[11]):.3f} \pm "
+                    rf"{np.degrees(param_sig[11]):.3f}\ \mathrm{{deg}}$"
+                )
+
+                axs[1].set_xlabel(r"$\Delta\alpha$ (mas)")
+                axs[1].set_ylabel(r"$\Delta\delta$ (mas)")
+                axs[1].invert_xaxis()
+                axs[1].legend(loc="upper left", frameon=False, fontsize=8)
+
+                axs[2].errorbar(
+                    obs_time[0],
+                    residuals[0],
+                    yerr=obs_err[0],
+                    ls="none",
+                    marker="s",
+                    ms=5.0,
+                    mew=1.2,
+                    elinewidth=1.2,
+                    color="tab:green",
+                    ecolor="black",
+                    mec="black",
+                    zorder=3,
+                )
+
+                axs[2].errorbar(
+                    obs_time[1:-1],
+                    residuals[1:-1],
+                    yerr=obs_err[1:-1],
+                    ls="none",
+                    marker="s",
+                    ms=5.0,
+                    mew=1.2,
+                    elinewidth=1.2,
+                    color="tab:purple",
+                    ecolor="black",
+                    mec="black",
+                    zorder=2,
+                )
+
+                axs[2].errorbar(
+                    obs_time[-1],
+                    residuals[-1],
+                    yerr=obs_err[-1],
+                    ls="none",
+                    marker="s",
+                    ms=5.0,
+                    mew=1.2,
+                    elinewidth=1.2,
+                    color="tab:red",
+                    ecolor="black",
+                    mec="black",
+                    zorder=3,
+                )
+
+                axs[2].set_xlabel("Time (yr)")
+                axs[2].set_ylabel("Residuals (mas)")
+
+                axs[2].text(
+                    0.04,
+                    0.92,
+                    f"RUWE = {self.ruwe:.3f}",
+                    ha="left",
+                    va="center",
+                    transform=axs[2].transAxes,
+                    fontsize=12,
+                )
+
+                plt.savefig(plot_file)
+
+        else:
+            warnings.warn(f"The fit was not successful: {result.message}")
+            fig = None
 
         return fig

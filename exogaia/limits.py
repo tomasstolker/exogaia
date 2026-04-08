@@ -9,7 +9,6 @@ import numpy as np
 
 from astropy import units as u
 
-# from astropy.io import fits
 from beartype import beartype, typing
 from matplotlib.figure import Figure
 from scipy.ndimage import gaussian_filter
@@ -57,7 +56,15 @@ class CompletenessMap(ExoGaia):
         self.gaia_release = gaia_release
 
         self.epoch_astrom = EpochAstrometry(
-            primary_mass=self.primary_mass, gaia_release=self.gaia_release
+            primary_mass=self.primary_mass,
+            gaia_release=self.gaia_release,
+            verbose=False,
+        )
+
+        print(f"Gaia ID = {self.source_id}")
+        print(f"Gaia release = {self.gaia_release}")
+        print(
+            f"\nPrimary mass = {self.primary_mass[0]:.2f} +/- {self.primary_mass[1]:.2f}"
         )
 
         self.epoch_astrom.query_source(source_id=self.source_id, gaia_release="DR3")
@@ -84,27 +91,28 @@ class CompletenessMap(ExoGaia):
         Parameters
         ----------
         n_sigma : float, optional
-            Detection threshold in units of acceleration signal-to-noise
-            (default: 5.0).
+            Detection threshold in units of acceleration
+            signal-to-noise (default: 5.0).
         n_samples : int
-            Number of Monte Carlo realizations per grid point
-            (default: 30).
+            Number of Monte Carlo realizations per grid
+            point (default: 30).
         mass_points : np.ndarray, None
-            Grid of companion masses (Mjup). If ``None``, a linear
-            grid between 1 and 100 Mjup is used.
+            Grid of companion masses (Msun). If ``None``, a
+            linear grid between 0.001 and 0.1 Msun is used.
         sma_points : np.ndarray, None
-            Grid of semi-major axes in astronomical units. If None, a logarithmic
-            grid between 0.1 and 100 au is used.
+            Grid of semi-major axes (au). If ``None``, a
+            logarithmic grid between 0.1 and 100 au is used.
         filter_sigma : float, None
-            Width of the optional Gaussian filter that is applied to
-            smooth away the Monte Carlo sampling noise. The width is
-            in number of grid points, so a value of 1.0 works usually
-            well if for example the number of grid points is 50 in
-            both the mass and semi-major axis dimension. No filter is
-            applied if the argument is set to ``None``.
+            Width of the optional Gaussian filter that is applied
+            to smooth away the Monte Carlo sampling noise. The
+            width is in number of grid points, so a value of 1.0
+            works usually well if for example the number of grid
+            points is 50 in both the mass and semi-major axis
+            dimension. No filter is applied if the argument is
+            set to ``None``.
         plot_file : str, None
-            If provided, the completeness map is saved to this file. If None,
-            the plot is shown interactively.
+            If provided, the completeness map is saved to this
+            file. If ``None``, the plot is shown interactively.
 
         Returns
         -------
@@ -114,22 +122,20 @@ class CompletenessMap(ExoGaia):
 
         Notes
         -----
-        - Completeness is defined as the fraction of simulations for which
-          the total acceleration amplitude satisfies::
+        - Completeness is defined as the fraction of simulations
+          for which the total acceleration amplitude satisfies:
 
               accel / sigma_accel > n_sigma
 
-        - The resulting map shows completeness (%) as a function of companion
-          mass (in Jupiter masses) and semi-major axis.
-        - This method assumes IMPLICITLY that the primary mass and astrometric
-          setup are already configured in the object state.
+        - The resulting map shows completeness (%) as a function
+          of companion mass (Msun) and semi-major axis (au).
         """
 
         self.print_section("Completeness map")
 
         if mass_points is None:
-            # Grid points for companion mass (Mjup)
-            mass_points = np.linspace(1.0, 100.0, 50)
+            # Grid points for companion mass (Msun)
+            mass_points = np.linspace(0.001, 0.1, 50)
 
         if sma_points is None:
             # Grid points for semi-major axis (au)
@@ -139,13 +145,14 @@ class CompletenessMap(ExoGaia):
 
         pbar = tqdm(total=mass_points.size * sma_points.size)
 
-        for m2_idx, m2_item in enumerate(mass_points):
+        for mass2_idx, mass2_item in enumerate(mass_points):
             for sma_idx, sma_item in enumerate(sma_points):
                 for _ in range(n_samples):
+                    model_param = {"sma": sma_item}
+
                     self.epoch_astrom.simulate_data(
-                        mass_2=m2_item,
-                        sma=sma_item,
-                        verbose=False,
+                        model_param=model_param,
+                        mass_2=mass2_item,
                     )
 
                     least_sq = LeastSquares(epoch_astrometry=self.epoch_astrom)
@@ -174,12 +181,9 @@ class CompletenessMap(ExoGaia):
                     sigma_accel = np.sqrt(grad_accel @ cov_accel @ grad_accel)
 
                     if accel / sigma_accel > n_sigma:
-                        compl_map[m2_idx, sma_idx] += 1.0 / float(n_samples)
+                        compl_map[mass2_idx, sma_idx] += 1.0 / float(n_samples)
 
                 pbar.update(1)
-
-        # fits.writeto("test.fits", compl_map, overwrite=True)
-        # compl_map = fits.getdata("test.fits")
 
         if filter_sigma is not None:
             # Apply Gaussian filter to smooth out Monte Carlo noise
@@ -195,7 +199,7 @@ class CompletenessMap(ExoGaia):
         cbar.set_label("Completeness (%)", fontsize=12)
 
         ax.set_xlabel("Semi-major axis (au)", fontsize=12)
-        ax.set_ylabel(r"Companion mass ($M_\mathrm{J}$)", fontsize=12)
+        ax.set_ylabel(r"Companion mass ($M_\odot$)", fontsize=12)
         ax.set_xscale("log")
         ax.set_title(rf"${n_sigma}\sigma$ acceleration completeness", fontsize=10.0)
 

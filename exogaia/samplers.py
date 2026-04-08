@@ -27,6 +27,7 @@ from exogaia.priors import (
     SinPrior,
     UniformPrior,
 )
+from exogaia.utils import param_list_to_dict
 
 
 class NestedSampler(ExoGaia):
@@ -83,7 +84,7 @@ class NestedSampler(ExoGaia):
             "per": 5,
             "ecc": 6,
             "tau": 7,
-            "sma_0": 8,
+            "sma": 8,
             "inc": 9,
             "aop": 10,
             "pan": 11,
@@ -91,6 +92,16 @@ class NestedSampler(ExoGaia):
 
         # Number of model parameters
         self.n_params = len(self.param_indices)
+
+        print(
+            f"Primary mass (Msun) = {self.primary_mass[0]:.2f} "
+            f"+/- {self.primary_mass[1]:.2f}"
+        )
+        print(f"Number of parameters: {self.n_params}")
+
+        print("\nPriors:")
+        for key, value in self.priors.items():
+            print(f"   - {key} -> {value}")
 
     @beartype
     def set_priors(self) -> None:
@@ -134,7 +145,7 @@ class NestedSampler(ExoGaia):
                 truncate_zero=True,
                 truncate_upper=1.0,
             )
-            self.priors["sma_0"] = NormalPrior(
+            self.priors["sma"] = NormalPrior(
                 self.least_squares.best_param[8], param_sig[8], truncate_zero=True
             )
             self.priors["inc"] = NormalPrior(
@@ -160,15 +171,10 @@ class NestedSampler(ExoGaia):
             self.priors["per"] = LogUniformPrior(1e1, 1e5)
             self.priors["ecc"] = UniformPrior(0.0, 1.0)
             self.priors["tau"] = UniformPrior(0.0, 1.0)
-            self.priors["sma_0"] = LogUniformPrior(1e-3, 100.0)
+            self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
             self.priors["inc"] = SinPrior()
             self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
             self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
-            # self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
-            # self.priors["mass_1"] = NormalPrior(
-            #     self.primary_mass[0], self.primary_mass[1], truncate_zero=True
-            # )
-            # self.priors["mass_2"] = UniformPrior(0.0, 1.0)
 
     @beartype
     def prior_transform(self, cube):
@@ -217,7 +223,7 @@ class NestedSampler(ExoGaia):
 
         # Semi-major axis of photocenter (mas)
         # Default: log-uniform [log10(1e-3), log10(2)]
-        cube[8] = self.priors["sma_0"].draw_samples(1)[0]
+        cube[8] = self.priors["sma"].draw_samples(1)[0]
 
         # Inclination (rad)
         # Default: isotropic -> i = arccos(1 - 2u)
@@ -230,32 +236,6 @@ class NestedSampler(ExoGaia):
         # Position angle of ascending node (rad)
         # Default: uniform [0, 2π]
         cube[11] = self.priors["pan"].draw_samples(1)[0]
-
-        # # Primary mass (Msun)
-        # # Default: normal(primary_mass[0], primary_mass[1])
-        # cube[12] = self.priors["mass_1"].draw_samples(1)[0]
-        #
-        # # Companion mass (Mjup)
-        # if isinstance(self.priors["mass_2"], FixedPrior):
-        #     cube[12] = self.priors["mass_2"].fix_val
-        # else:
-        #     # Default: uniform [min_m2, m1] with mass_2 < mass_1
-        #     if isinstance(self.priors["mass_2"], UniformPrior):
-        #         m2_prior = UniformPrior(self.priors["mass_2"].min_val, cube[11])
-        #         cube[12] = m2_prior.draw_samples(1)[0]
-        #
-        #     else:
-        #         m2_sample = np.inf
-        #         m2_prior = NormalPrior(
-        #             self.priors["mass_2"].mu,
-        #             self.priors["mass_2"].sigma,
-        #             truncate_zero=True,
-        #         )
-        #
-        #         while m2_sample > cube[11]:
-        #             m2_sample = m2_prior.draw_samples(1)[0]
-        #
-        #         cube[12] = m2_sample
 
         return cube
 
@@ -276,8 +256,10 @@ class NestedSampler(ExoGaia):
             Log-likelihood.
         """
 
-        delta_eta = self.kepler_model.calc_1d_model(params)
-        # self.kepler_model.plot_orbit(params, 'test.png')
+        model_param = param_list_to_dict(params)
+
+        delta_eta = self.kepler_model.calc_1d_model(model_param)
+        # self.kepler_model.plot_orbit(model_param, 'test.png')
 
         if np.any(np.isnan(delta_eta)):
             print("NAN", params)
@@ -897,7 +879,7 @@ class MCMCSampler(ExoGaia):
             "per": 5,
             "ecc": 6,
             "tau": 7,
-            "sma_0": 8,
+            "sma": 8,
             "inc": 9,
             "aop": 10,
             "pan": 11,
@@ -905,6 +887,15 @@ class MCMCSampler(ExoGaia):
 
         # Number of model parameters
         self.n_params = len(self.param_indices)
+
+        print(
+            f"Primary mass (Msun) = {self.primary_mass[0]:.2f} +/- {self.primary_mass[1]:.2f}"
+        )
+        print(f"Number of parameters: {self.n_params}")
+
+        print("\nPriors:")
+        for key, value in self.priors.items():
+            print(f"   - {key} -> {value}")
 
     @beartype
     def set_priors(self) -> None:
@@ -948,7 +939,7 @@ class MCMCSampler(ExoGaia):
                 truncate_zero=True,
                 truncate_upper=1.0,
             )
-            self.priors["sma_0"] = NormalPrior(
+            self.priors["sma"] = NormalPrior(
                 self.least_squares.best_param[8], param_sig[8], truncate_zero=True
             )
             self.priors["inc"] = NormalPrior(
@@ -974,15 +965,10 @@ class MCMCSampler(ExoGaia):
             self.priors["per"] = LogUniformPrior(1e1, 1e5)
             self.priors["ecc"] = UniformPrior(0.0, 1.0)
             self.priors["tau"] = UniformPrior(0.0, 1.0)
-            self.priors["sma_0"] = LogUniformPrior(1e-3, 100.0)
+            self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
             self.priors["inc"] = SinPrior()
             self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
             self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
-            # self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
-            # self.priors["mass_1"] = NormalPrior(
-            #     self.primary_mass[0], self.primary_mass[1], truncate_zero=True
-            # )
-            # self.priors["mass_2"] = UniformPrior(0.0, 1.0)
 
     @beartype
     def log_prior(self, params: np.ndarray) -> Real:
@@ -1069,7 +1055,10 @@ class MCMCSampler(ExoGaia):
             Log-likelihood of the model evaluation.
         """
 
-        delta_eta = self.kepler_model.calc_1d_model(params)
+        model_param = param_list_to_dict(params)
+
+        delta_eta = self.kepler_model.calc_1d_model(model_param)
+        # self.kepler_model.plot_orbit(model_param, 'test.png')
 
         if np.any(np.isnan(delta_eta)):
             print("NAN", params)
@@ -1106,6 +1095,7 @@ class MCMCSampler(ExoGaia):
         """
 
         log_prior = self.log_prior(params)
+        print(log_prior)
 
         if np.isfinite(log_prior):
             log_prob = log_prior + self.log_likelihood(params)

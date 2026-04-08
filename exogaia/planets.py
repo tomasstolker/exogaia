@@ -114,10 +114,12 @@ class OccurrenceRate(ExoGaia):
             print(f"Occurrence rate: {self.occ_rate.__name__}")
             print("\nValid ranges:")
             print(
-                f"   - Semi-major axis (au): {self.sma_range[0]:.2f} - {self.sma_range[1]:.2f}"
+                "   - Semi-major axis (au): "
+                f"{self.sma_range[0]:.2f} - {self.sma_range[1]:.2f}"
             )
             print(
-                f"   - Companion mass (Mjup): {self.mass_range[0]:.2f} - {self.mass_range[1]:.2f}"
+                "   - Companion mass (Mjup): "
+                f"{self.mass_range[0]:.2f} - {self.mass_range[1]:.2f}"
             )
 
             if isinstance(self.primary_mass, Real):
@@ -316,9 +318,8 @@ class OccurrenceRate(ExoGaia):
             Semi-major axes (au). Entries are NaN for stars without
             an assigned planet in case ``allow_reject=True``. The
             array has the same length as ``self.primary_mass``.
-
         np.ndarray
-            Planet masses (Mjup). Entries are NaN for stars without
+            Planet masses (Msun). Entries are NaN for stars without
             an assigned planet in case ``allow_reject=True``. The
             array has the same length as ``self.primary_mass``.
         """
@@ -382,12 +383,16 @@ class OccurrenceRate(ExoGaia):
                 sma_list[star_idx] = np.exp(log_sma)
                 mass_list[star_idx] = np.exp(log_mass)
 
+        # Convert from Mjup to Msun
+
+        mass_list = (mass_list * u.M_jup).to(u.M_sun).value
+
         if self.verbose:
             print(f"Number of planets: {np.sum(~np.isnan(sma_list))}")
 
             if len(sma_list) == 1:
                 print(f"\nSemi-major axis (au) = {sma_list[0]:.2f}")
-                print(f"Companion mass (Mjup) = {mass_list[0]:.2f}")
+                print(f"Companion mass (Msun) = {mass_list[0]:.2e}")
 
             elif len(sma_list) > 1:
                 print(
@@ -395,8 +400,8 @@ class OccurrenceRate(ExoGaia):
                     f"{np.min(sma_list):.2f} - {np.max(sma_list):.2f}"
                 )
                 print(
-                    "Companion mass range (Mjup) = "
-                    f"{np.min(mass_list):.2f} - {np.max(mass_list):.2f}"
+                    "Companion mass range (Msun) = "
+                    f"{np.min(mass_list):.2e} - {np.max(mass_list):.2e}"
                 )
 
         return sma_list, mass_list

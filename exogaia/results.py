@@ -17,7 +17,7 @@ from scipy.stats import norm
 
 from exogaia.core import ExoGaia
 from exogaia.models import KeplerModel
-from exogaia.utils import orbit_sky
+from exogaia.utils import orbit_sky, param_list_to_dict
 
 
 class SamplingResults(ExoGaia):
@@ -368,9 +368,10 @@ class SamplingResults(ExoGaia):
         # Best sample
         max_idx = np.argmax(self.ln_like)
         best_params = self.samples[max_idx, :]
+        model_param = param_list_to_dict(best_params)
 
         kepler_model = KeplerModel(epoch_astrometry=self.epoch_astrometry)
-        best_model = kepler_model.calc_1d_model(best_params)
+        best_model = kepler_model.calc_1d_model(model_param)
 
         residuals = obs_pos - best_model
 
@@ -483,24 +484,26 @@ class SamplingResults(ExoGaia):
         best_params = self.samples[max_idx, :]
 
         # period = np.sqrt(best_params[5] ** 3 / best_params[11]) * 365.25
-        # obs_time = np.linspace(0.0, period, 1000)
+        # obs_time = np.linspace(0.0, period, 10000)
 
         yr_start = self.ref_epoch
         yr_end = self.ref_epoch + (best_params[5] / 365.25) * u.yr
 
-        obs_time_full = np.linspace(yr_start, yr_end, 1000)
+        obs_time_full = np.linspace(yr_start, yr_end, 10000)
         obs_time_full = obs_time_full.tcb.jyear
+
+        model_param = param_list_to_dict(best_params)
 
         kepler_model = KeplerModel(
             epoch_astrometry=self.epoch_astrometry, verbose=False
         )
 
         delta_ra_full, delta_dec_full = kepler_model.calc_orbit(
-            best_params, obs_time=obs_time_full
+            model_param, obs_time=obs_time_full
         )
 
-        delta_ra, delta_dec = kepler_model.calc_orbit(best_params, obs_time=None)
-        residuals = kepler_model.calc_residuals(best_params)
+        delta_ra, delta_dec = kepler_model.calc_orbit(model_param, obs_time=None)
+        residuals = kepler_model.calc_residuals(model_param)
 
         self.print_section("Plot orbit")
 
@@ -581,10 +584,12 @@ class SamplingResults(ExoGaia):
         )
 
         # Time of periastron in Julian years
-        t_per = self.ref_epoch.value + (best_params[5] * best_params[7]) / 365.25
+        t_per = (
+            self.ref_epoch.value + (model_param["per"] * model_param["tau"]) / 365.25
+        )
 
         delta_ra_per, delta_dec_per = kepler_model.calc_orbit(
-            best_params, obs_time=np.array([t_per])
+            model_param, obs_time=np.array([t_per])
         )
 
         plt.plot(
@@ -600,12 +605,12 @@ class SamplingResults(ExoGaia):
         )
 
         x_nodes, y_nodes = orbit_sky(
-            nu=np.array([best_params[10], np.pi + best_params[10]]),
-            sma=best_params[8],
-            ecc=best_params[6],
-            inc=best_params[9],
-            aop=best_params[10],
-            pan=best_params[11],
+            nu=np.array([model_param["aop"], np.pi + model_param["aop"]]),
+            sma=model_param["sma"],
+            ecc=model_param["ecc"],
+            inc=model_param["inc"],
+            aop=model_param["aop"],
+            pan=model_param["pan"],
         )
 
         plt.plot(
