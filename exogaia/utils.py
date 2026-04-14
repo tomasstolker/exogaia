@@ -261,7 +261,9 @@ def calc_mass_from_sma(
 
 @beartype
 def thiele_innes_to_campbell(
-    source_id: typing.Optional[typing.Union[int, np.int64]], sma_0: Real, model_param: np.ndarray
+    source_id: typing.Optional[typing.Union[int, np.int64]],
+    sma_0: Real,
+    model_param: np.ndarray,
 ) -> np.ndarray:
     """
     Convert Thiele–Innes orbital parameters into Campbell elements.

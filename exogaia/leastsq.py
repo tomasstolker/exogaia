@@ -73,6 +73,7 @@ class LeastSquares(ExoGaia):
         self.chi2 = None
         self.chi2_red = None
         self.n_dof = None
+        self.fit_success = None
 
     def __repr__(self):
         """
@@ -1438,7 +1439,10 @@ class LeastSquares(ExoGaia):
 
     @beartype
     def orbit_grid(
-        self, plot_file: typing.Optional[str] = None, n_points: int = 30
+        self,
+        plot_file: typing.Optional[str] = None,
+        n_points: int = 30,
+        verbose=True,
     ) -> typing.Optional[Figure]:
         """
         Method for exploring a grid of orbits of varying semi-major
@@ -1461,6 +1465,8 @@ class LeastSquares(ExoGaia):
             Number of grid points in the period, eccentricity, and
             epoch of periastron dimensions. The default is 30, so
             calculating a grid with shape (30, 30, 30).
+        verbose : bool
+            Print some information (default: True).
 
         Returns
         -------
@@ -1468,7 +1474,8 @@ class LeastSquares(ExoGaia):
             Matplotlib ``Figure`` object.
         """
 
-        self.print_section("Orbit grid (12-parameters)")
+        if verbose:
+            self.print_section("Orbit grid (12-parameters)")
 
         # Epoch astrometry data
         obs_pos = self.data_table["centroid_pos_al"].to_numpy()
@@ -1600,119 +1607,56 @@ class LeastSquares(ExoGaia):
 
         # Print best-fit parameters
 
-        print(f"\nBest-fit RUWE = {global_ruwe:.3f}")
+        if verbose:
+            print(f"\nBest-fit RUWE = {global_ruwe:.3f}")
 
-        print("\nBest-fit stellar track:")
-        print(f"   - RA offset (mas) = {global_param[0]:.3f} +/- {global_sigma[0]:.3f}")
-        print(
-            f"   - Dec offset (mas) = {global_param[1]:.3f} "
-            f"+/- {global_sigma[1]:.3f}"
-        )
-        print(f"   - Parallax (mas) = {global_param[2]:.3f} +/- {global_sigma[2]:.3f}")
-        print(
-            f"   - mu in RA (mas/yr) = {global_param[3]:.3f} "
-            f"+/- {global_sigma[3]:.3f}"
-        )
-        print(
-            f"   - mu in Dec (mas/yr) = {global_param[4]:.3f} "
-            f"+/- {global_sigma[4]:.3f}"
-        )
+            print("\nBest-fit stellar track:")
+            print(
+                f"   - RA offset (mas) = {global_param[0]:.3f} +/- {global_sigma[0]:.3f}"
+            )
+            print(
+                f"   - Dec offset (mas) = {global_param[1]:.3f} "
+                f"+/- {global_sigma[1]:.3f}"
+            )
+            print(
+                f"   - Parallax (mas) = {global_param[2]:.3f} +/- {global_sigma[2]:.3f}"
+            )
+            print(
+                f"   - mu in RA (mas/yr) = {global_param[3]:.3f} "
+                f"+/- {global_sigma[3]:.3f}"
+            )
+            print(
+                f"   - mu in Dec (mas/yr) = {global_param[4]:.3f} "
+                f"+/- {global_sigma[4]:.3f}"
+            )
 
-        print("\nBest-fit orbit:")
-        print(f"   - Period (days) = {global_param[9]:.3f}")
-        print(f"   - Eccentricity = {global_param[10]:.3f}")
-        print(f"   - Relative time of periastron = {global_param[11]:.2f}")
-        print(f"   - Thiele-Innes A = {global_param[5]:.3f} +/- {global_sigma[5]:.3f}")
-        print(f"   - Thiele-Innes B = {global_param[6]:.3f} +/- {global_sigma[6]:.3f}")
-        print(f"   - Thiele-Innes F = {global_param[7]:.3f} +/- {global_sigma[7]:.3f}")
-        print(f"   - Thiele-Innes G = {global_param[8]:.3f} +/- {global_sigma[8]:.3f}")
+            print("\nBest-fit orbit:")
+            print(f"   - Period (days) = {global_param[9]:.3f}")
+            print(f"   - Eccentricity = {global_param[10]:.3f}")
+            print(f"   - Relative time of periastron = {global_param[11]:.2f}")
+            print(
+                f"   - Thiele-Innes A = {global_param[5]:.3f} +/- {global_sigma[5]:.3f}"
+            )
+            print(
+                f"   - Thiele-Innes B = {global_param[6]:.3f} +/- {global_sigma[6]:.3f}"
+            )
+            print(
+                f"   - Thiele-Innes F = {global_param[7]:.3f} +/- {global_sigma[7]:.3f}"
+            )
+            print(
+                f"   - Thiele-Innes G = {global_param[8]:.3f} +/- {global_sigma[8]:.3f}"
+            )
 
-        print("\nDerived parameters:")
-        print(
-            "   - Semi-major axis of photocenter (mas) "
-            f"= {sma_0:.3f} +/- {sma_0_sigma:.3f}"
-        )
-        print(f"   - Relative semi-major axis (au) = {sma:.3f}")
-        print(f"   - Mass function (Msun) = {f_mass:.3e}")
-        print(f"   - Companion mass (Msun) = {mass_2:.3e}")
+            print("\nDerived parameters:")
+            print(
+                "   - Semi-major axis of photocenter (mas) "
+                f"= {sma_0:.3f} +/- {sma_0_sigma:.3f}"
+            )
+            print(f"   - Relative semi-major axis (au) = {sma:.3f}")
+            print(f"   - Mass function (Msun) = {f_mass:.3e}")
+            print(f"   - Companion mass (Msun) = {mass_2:.3e}")
 
-        # Select minimum RUWE along the 3rd axis to create a 2D array
-
-        ruwe_grid_2d = np.nanmin(ruwe_grid, axis=2)
-
-        # Select indices with the minimum RUWE along the 3rd axis
-
-        min_idx = np.argmin(ruwe_grid, axis=2)
-
-        # Create a grid with the best-fit tau for each period-ecc pair
-
-        tau_best = np.zeros((logp_list.size, ecc_list.size))
-        for logp_idx, logp_item in enumerate(logp_list):
-            for ecc_idx, ecc_item in enumerate(ecc_list):
-                tau_idx = min_idx[logp_idx, ecc_idx]
-                tau_best[logp_idx, ecc_idx] = tau_grid[logp_idx, ecc_idx, tau_idx]
-
-        # Create goodness-of-fit plot
-
-        fig = plt.figure(figsize=(4, 3))
-
-        grid_spec = GridSpec(1, 2, width_ratios=[4.0, 0.25])
-        grid_spec.update(wspace=0.07, hspace=0, left=0, right=1, bottom=0, top=1)
-
-        ax = plt.subplot(grid_spec[0, 0])
-        ax_cb = plt.subplot(grid_spec[0, 1])
-
-        x_grid, y_grid = np.meshgrid(10.0**logp_list, ecc_list)
-
-        # Transpose to make eccentricity rows and semi-major axis columns
-
-        c = ax.contourf(x_grid, y_grid, ruwe_grid_2d.T, levels=30)
-
-        cb = Colorbar(
-            ax=ax_cb,
-            mappable=c,
-            orientation="vertical",
-            ticklocation="right",
-            format="%.2f",
-        )
-
-        cb.ax.minorticks_on()
-
-        cb.ax.tick_params(
-            which="major",
-            width=0.8,
-            length=5,
-            labelsize=12,
-            direction="in",
-            color="black",
-        )
-
-        cb.ax.set_ylabel(
-            "RUWE",
-            rotation=270,
-            labelpad=22,
-            fontsize=13.0,
-        )
-
-        # Transpose to make eccentricity rows and semi-major axis columns
-
-        # cs = ax.contour(
-        #     x_grid,
-        #     y_grid,
-        #     tau_best.T,
-        #     levels=10,
-        #     colors="white",
-        #     linewidths=0.7,
-        # )
-        #
-        # ax.clabel(cs, cs.levels, inline=True, fontsize=8, fmt="%1.1f")
-
-        ax.set_xlabel("Period (days)")
-        ax.set_ylabel("Eccentricity")
-        ax.set_xscale("log")
-
-        if plot_file is not None:
-            plt.savefig(plot_file)
+        # Store best-fit parameters, model, and RUWE
 
         self.best_param = thiele_innes_to_campbell(
             self.epoch_astrometry.source_id, sma_0, global_param
@@ -1720,6 +1664,88 @@ class LeastSquares(ExoGaia):
 
         self.best_model = global_model
         self.ruwe = global_ruwe
+
+        # Create optional figure
+
+        fig = None
+
+        if plot_file is not None:
+            # Select minimum RUWE along the 3rd axis to create a 2D array
+
+            ruwe_grid_2d = np.nanmin(ruwe_grid, axis=2)
+
+            # Select indices with the minimum RUWE along the 3rd axis
+
+            min_idx = np.argmin(ruwe_grid, axis=2)
+
+            # Create a grid with the best-fit tau for each period-ecc pair
+
+            tau_best = np.zeros((logp_list.size, ecc_list.size))
+            for logp_idx, logp_item in enumerate(logp_list):
+                for ecc_idx, ecc_item in enumerate(ecc_list):
+                    tau_idx = min_idx[logp_idx, ecc_idx]
+                    tau_best[logp_idx, ecc_idx] = tau_grid[logp_idx, ecc_idx, tau_idx]
+
+            # Create goodness-of-fit plot
+
+            fig = plt.figure(figsize=(4, 3))
+
+            grid_spec = GridSpec(1, 2, width_ratios=[4.0, 0.25])
+            grid_spec.update(wspace=0.07, hspace=0, left=0, right=1, bottom=0, top=1)
+
+            ax = plt.subplot(grid_spec[0, 0])
+            ax_cb = plt.subplot(grid_spec[0, 1])
+
+            x_grid, y_grid = np.meshgrid(10.0**logp_list, ecc_list)
+
+            # Transpose to make eccentricity rows and semi-major axis columns
+
+            c = ax.contourf(x_grid, y_grid, ruwe_grid_2d.T, levels=30)
+
+            cb = Colorbar(
+                ax=ax_cb,
+                mappable=c,
+                orientation="vertical",
+                ticklocation="right",
+                format="%.2f",
+            )
+
+            cb.ax.minorticks_on()
+
+            cb.ax.tick_params(
+                which="major",
+                width=0.8,
+                length=5,
+                labelsize=12,
+                direction="in",
+                color="black",
+            )
+
+            cb.ax.set_ylabel(
+                "RUWE",
+                rotation=270,
+                labelpad=22,
+                fontsize=13.0,
+            )
+
+            # Transpose to make eccentricity rows and semi-major axis columns
+
+            # cs = ax.contour(
+            #     x_grid,
+            #     y_grid,
+            #     tau_best.T,
+            #     levels=10,
+            #     colors="white",
+            #     linewidths=0.7,
+            # )
+            #
+            # ax.clabel(cs, cs.levels, inline=True, fontsize=8, fmt="%1.1f")
+
+            ax.set_xlabel("Period (days)")
+            ax.set_ylabel("Eccentricity")
+            ax.set_xscale("log")
+
+            plt.savefig(plot_file)
 
         # Do not store because the P, e, and tau
         # covariances are not included
