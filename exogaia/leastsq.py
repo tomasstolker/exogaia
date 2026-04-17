@@ -1505,7 +1505,8 @@ class LeastSquares(ExoGaia):
         global_param = None
         global_cov = None
 
-        pbar = tqdm(total=len(logp_list) * len(ecc_list))
+        if verbose:
+            pbar = tqdm(total=len(logp_list) * len(ecc_list))
 
         for logp_idx, logp_item in enumerate(logp_list):
             for ecc_idx, ecc_item in enumerate(ecc_list):
@@ -1562,9 +1563,11 @@ class LeastSquares(ExoGaia):
                     # Store tau for contour plot
                     tau_grid[logp_idx, ecc_idx, tau_idx] = tau_item
 
-                pbar.update(1)
+                if verbose:
+                    pbar.update(1)
 
-        pbar.close()
+        if verbose:
+            pbar.close()
 
         # fig, ax = plt.subplots(figsize=(7, 3))
         # cmap = cm.viridis
