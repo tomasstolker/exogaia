@@ -16,6 +16,7 @@ from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
 from scipy.linalg import cho_factor, cho_solve
 from scipy.optimize import minimize, least_squares
+from scipy.stats import chi2, norm
 from tqdm.auto import tqdm
 
 # from matplotlib import cm
@@ -1440,9 +1441,11 @@ class LeastSquares(ExoGaia):
     @beartype
     def orbit_grid(
         self,
-        plot_file: typing.Optional[str] = None,
         n_points: int = 30,
-        verbose=True,
+        map_type: str = "chi2_det",
+        plot_file: typing.Optional[str] = None,
+        verbose: bool = True,
+        n_sigma: typing.List[Real] = [1, 3, 5],
     ) -> typing.Optional[Figure]:
         """
         Method for exploring a grid of orbits of varying semi-major
@@ -1458,15 +1461,27 @@ class LeastSquares(ExoGaia):
 
         Parameters
         ----------
-        plot_file : str, None
-            File name of the plot with the results. No plot
-            is created when the argument is set to ``None``.
         n_points : int
             Number of grid points in the period, eccentricity, and
             epoch of periastron dimensions. The default is 30, so
             calculating a grid with shape (30, 30, 30).
+        map_type : str
+            Either 'ruwe', to plot a map of the RUWE, 'chi2_det',
+            to plot a map of the detection significance,
+            :math:`\\chi^2_\\mathrm{single} - \\chi^2_\\mathrm{orbit}`,
+            or 'chi2_param', to plot a map of the parameter
+            confidence, :math:`\\chi^2 - \\chi^2_\\mathrm{min}`
+            (default: 'chi2_det').
+        plot_file : str, None
+            File name of the plot with the results. No plot
+            is created when the argument is set to ``None``.
         verbose : bool
             Print some information (default: True).
+        n_sigma : list(float)
+            List with the number of sigmas for for contours
+            will be drawn when the argument of ``map_type``
+            is set to 'chi2_det' or 'chi2_param'
+            (default: [1, 3, 5]).
 
         Returns
         -------
@@ -1477,12 +1492,24 @@ class LeastSquares(ExoGaia):
         if verbose:
             self.print_section("Orbit grid (12-parameters)")
 
+        if map_type not in ["ruwe", "chi2_det", "chi2_param"]:
+            raise ValueError(
+                "The argument of 'map_type' should be set "
+                "to 'ruwe', 'chi2_det', or 'chi2_param."
+            )
+
+        n_sigma = np.array(n_sigma)
+
         # Epoch astrometry data
         obs_pos = self.data_table["centroid_pos_al"].to_numpy()
         rel_yr = self.data_table["relative_time_year"].to_numpy()
         sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
         cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
         par_fac = self.data_table["parallax_factor_al"].to_numpy()
+
+        # Null hypothesis
+        self.singl_5param(plot_file=None, verbose=False)
+        chi2_5param = self.chi2
 
         # Grid for the log10(P/days)
         logp_list = np.linspace(np.log10(1e2), np.log10(1e5), n_points)
@@ -1497,7 +1524,7 @@ class LeastSquares(ExoGaia):
             epoch_astrometry=self.epoch_astrometry, verbose=False
         )
 
-        ruwe_grid = np.zeros((logp_list.size, ecc_list.size, tau_list.size))
+        map_grid = np.zeros((logp_list.size, ecc_list.size, tau_list.size))
         tau_grid = np.zeros((logp_list.size, ecc_list.size, tau_list.size))
 
         global_ruwe = np.inf
@@ -1557,8 +1584,14 @@ class LeastSquares(ExoGaia):
                     #          y_sky + (best_model-obs_pos)*cos_scan_ang, 'o')
                     # plt.show()
 
-                    # Store RUWE as goodness-of-fit statistics
-                    ruwe_grid[logp_idx, ecc_idx, tau_idx] = ruwe
+                    if map_type == "ruwe":
+                        # Store RUWE as goodness-of-fit statistic
+                        map_grid[logp_idx, ecc_idx, tau_idx] = ruwe
+
+                    else:
+                        # Store detection or parameter significance
+                        # Difference is calculated afterwards
+                        map_grid[logp_idx, ecc_idx, tau_idx] = self.chi2
 
                     # Store tau for contour plot
                     tau_grid[logp_idx, ecc_idx, tau_idx] = tau_item
@@ -1662,7 +1695,10 @@ class LeastSquares(ExoGaia):
         # Store best-fit parameters, model, and RUWE
 
         self.best_param = thiele_innes_to_campbell(
-            self.epoch_astrometry.source_id, sma_0, global_param
+            self.epoch_astrometry.source_id,
+            sma_0,
+            global_param,
+            verbose=verbose,
         )
 
         self.best_model = global_model
@@ -1672,14 +1708,24 @@ class LeastSquares(ExoGaia):
 
         fig = None
 
-        if plot_file is not None:
-            # Select minimum RUWE along the 3rd axis to create a 2D array
+        if map_type == "chi2_det":
+            # Detection significance
+            # delta chi2 = chi2_single - chi2_orbit
+            map_grid = chi2_5param - map_grid
 
-            ruwe_grid_2d = np.nanmin(ruwe_grid, axis=2)
+        elif map_type == "chi2_param":
+            # Parameter confidence:
+            # delta chi2 = chi2_orbit - chi2_min
+            map_grid -= np.nanmin(map_grid)
+
+        if plot_file is not None:
+            # Select minimum RUWE or chi2 along the 3rd axis to create a 2D array
+
+            map_grid_2d = np.nanmin(map_grid, axis=2)
 
             # Select indices with the minimum RUWE along the 3rd axis
 
-            min_idx = np.argmin(ruwe_grid, axis=2)
+            min_idx = np.argmin(map_grid, axis=2)
 
             # Create a grid with the best-fit tau for each period-ecc pair
 
@@ -1703,14 +1749,14 @@ class LeastSquares(ExoGaia):
 
             # Transpose to make eccentricity rows and semi-major axis columns
 
-            c = ax.contourf(x_grid, y_grid, ruwe_grid_2d.T, levels=30)
+            c = ax.contourf(x_grid, y_grid, map_grid_2d.T, levels=30)
 
             cb = Colorbar(
                 ax=ax_cb,
                 mappable=c,
                 orientation="vertical",
                 ticklocation="right",
-                format="%.2f",
+                format="%.1f",
             )
 
             cb.ax.minorticks_on()
@@ -1724,12 +1770,80 @@ class LeastSquares(ExoGaia):
                 color="black",
             )
 
-            cb.ax.set_ylabel(
-                "RUWE",
-                rotation=270,
-                labelpad=22,
-                fontsize=13.0,
-            )
+            if map_type == "ruwe":
+                cb.ax.set_ylabel(
+                    "RUWE",
+                    rotation=270,
+                    labelpad=22,
+                    fontsize=13.0,
+                )
+
+            elif map_type == "chi2_det":
+                cb.ax.set_ylabel(
+                    r"$\chi^2_\mathrm{single} - \chi^2_\mathrm{orbit}$",
+                    rotation=270,
+                    labelpad=22,
+                    fontsize=13.0,
+                )
+
+                # Two-sided Gaussian probabilities
+                q_chi2 = norm.cdf(n_sigma) - norm.cdf(-n_sigma)
+
+                # Extra fitted orbital parameters:
+                # P, e, T0, and A, B, F, G (TI constants)
+                df_chi2 = 7
+
+                # Delta chi2 = chi2_5param - chi2_orbit
+                delta_chi2_levels = chi2.ppf(q=q_chi2, df=df_chi2)
+
+                cs = ax.contour(
+                    x_grid,
+                    y_grid,
+                    map_grid_2d.T,
+                    levels=delta_chi2_levels,
+                    colors="white",
+                    linestyles="--",
+                    linewidths=0.7,
+                )
+
+                fmt = {}
+                for sig_idx, sig_item in enumerate(n_sigma):
+                    fmt[delta_chi2_levels[sig_idx]] = rf"{sig_item}$\sigma$"
+
+                ax.clabel(cs, fmt=fmt, inline=True, inline_spacing=10, fontsize=7)
+
+            elif map_type == "chi2_param":
+                cb.ax.set_ylabel(
+                    r"$\chi^2 - \chi^2_\mathrm{min}$",
+                    rotation=270,
+                    labelpad=22,
+                    fontsize=13.0,
+                )
+
+                # Two-sided Gaussian probabilities
+                q_chi2 = norm.cdf(n_sigma) - norm.cdf(-n_sigma)
+
+                # Grid shows two parameters: P and e
+                df_chi2 = 2
+
+                # Delta chi2 = chi2_5param - chi2_orbit
+                delta_chi2_levels = chi2.ppf(q=q_chi2, df=df_chi2)
+
+                cs = ax.contour(
+                    x_grid,
+                    y_grid,
+                    map_grid_2d.T,
+                    levels=delta_chi2_levels,
+                    colors="white",
+                    linestyles="--",
+                    linewidths=0.7,
+                )
+
+                fmt = {}
+                for sig_idx, sig_item in enumerate(n_sigma):
+                    fmt[delta_chi2_levels[sig_idx]] = rf"{sig_item}$\sigma$"
+
+                ax.clabel(cs, fmt=fmt, inline=True, inline_spacing=10, fontsize=7)
 
             # Transpose to make eccentricity rows and semi-major axis columns
 
@@ -1761,6 +1875,7 @@ class LeastSquares(ExoGaia):
         self,
         inc_jitter: bool = False,
         plot_file: typing.Optional[str] = None,
+        verbose: bool = True,
     ) -> typing.Optional[Figure]:
         """
         Fit a Keplerian astrometric orbit using maximum likelihood and
@@ -1789,6 +1904,8 @@ class LeastSquares(ExoGaia):
         plot_file : str or None
             File name for saving the diagnostic plot of the best-fit orbit
             and residuals. If ``None``, no plot is generated or saved.
+        verbose : bool
+            Print some information (default: True).
 
         Returns
         -------
@@ -1802,7 +1919,8 @@ class LeastSquares(ExoGaia):
         if self.best_param is None or len(self.best_param) != 12:
             self.orbit_grid(plot_file=None, n_points=30)
 
-        self.print_section("Orbit fit (12 parameters)")
+        if verbose:
+            self.print_section("Orbit fit (12 parameters)")
 
         # Epoch astrometry data
         obs_time = self.data_table["obs_time_tcb"].to_numpy()
@@ -1959,105 +2077,106 @@ class LeastSquares(ExoGaia):
             # generated/scipy.optimize.least_squares.html
             self.chi2 = 2.0 * result.cost
             self.chi2_red = self.chi2 / dof
-            print(f"Reduced chi^2: {self.chi2_red:.3f}")
 
             if self.epoch_astrometry.sim_data:
                 self.ruwe = np.sqrt(self.chi2_red)
             else:
                 self.ruwe = np.sqrt(self.chi2_red) / self.epoch_astrometry.u0_norm
 
-            print(f"RUWE: {self.ruwe:.3f}")
+            if verbose:
+                print(f"Reduced chi^2: {self.chi2_red:.3f}")
+                print(f"RUWE: {self.ruwe:.3f}")
 
-            print("\nBest-fit stellar track:")
+                print("\nBest-fit stellar track:")
 
-            print(
-                "   - RA offset (mas) = "
-                f"{self.best_param[0]:.3f} "
-                f"+/- {param_sig[0]:.3f}"
-            )
-
-            print(
-                "   - Dec offset (mas) = "
-                f"{self.best_param[1]:.3f} "
-                f"+/- {param_sig[1]:.3f}"
-            )
-
-            print(
-                "   - Parallax (mas) = "
-                f"{self.best_param[2]:.3f} "
-                f"+/- {param_sig[2]:.3f}"
-            )
-
-            print(
-                "   - mu in RA (mas/yr) = "
-                f"{self.best_param[3]:.3f} "
-                f"+/- {param_sig[3]:.3f}"
-            )
-
-            print(
-                "   - mu in Dec (mas/yr) = "
-                f"{self.best_param[4]:.3f} "
-                f"+/- {param_sig[4]:.3f}"
-            )
-
-            print("\nBest-fit orbit:")
-
-            print(
-                "   - Period (days) = "
-                f"{self.best_param[5]:.3f} "
-                f"+/- {param_sig[5]:.3f}"
-            )
-
-            print(
-                "   - Eccentricity = "
-                f"{self.best_param[6]:.3f} "
-                f"+/- {param_sig[6]:.3f}"
-            )
-
-            print(
-                "   - Relative time of periastron = "
-                f"{self.best_param[7]:.3f} "
-                f"+/- {param_sig[7]:.3f}"
-            )
-
-            print(
-                "   - Semi-major axis of photocenter (mas) = "
-                f"{self.best_param[8]:.3f} "
-                f"+/- {param_sig[8]:.3f}"
-            )
-
-            print(
-                "   - Inclination (deg) = "
-                f"{np.degrees(self.best_param[9]):.3f} "
-                f"+/- {np.degrees(param_sig[9]):.3f}"
-            )
-
-            print(
-                "   - Argument of periastron (deg) = "
-                f"{np.degrees(self.best_param[10]):.3f} "
-                f"+/- {np.degrees(param_sig[10]):.3f}"
-            )
-
-            print(
-                "   - PA of ascending node (deg) = "
-                f"{np.degrees(self.best_param[11]):.3f} "
-                f"+/- {np.degrees(param_sig[11]):.3f}"
-            )
-
-            if inc_jitter:
                 print(
-                    "   - Jitter (mas) = "
-                    f"{self.best_param[12]:.3f} "
-                    f"+/- {param_sig[12]:.3f}"
+                    "   - RA offset (mas) = "
+                    f"{self.best_param[0]:.3f} "
+                    f"+/- {param_sig[0]:.3f}"
                 )
 
-            print(f"\nNumber of function evaluations: {result.nfev}")
-            print(f"Number of Jacobian evaluations: {result.njev}")
+                print(
+                    "   - Dec offset (mas) = "
+                    f"{self.best_param[1]:.3f} "
+                    f"+/- {param_sig[1]:.3f}"
+                )
 
-            print("\nDerived parameters:")
-            print(f"   - Relative semi-major axis (au) = {sma:.3f}")
-            print(f"   - Mass function (Msun) = {f_mass:.3e}")
-            print(f"   - Companion mass (Msun) = {mass_2:.3e}")
+                print(
+                    "   - Parallax (mas) = "
+                    f"{self.best_param[2]:.3f} "
+                    f"+/- {param_sig[2]:.3f}"
+                )
+
+                print(
+                    "   - mu in RA (mas/yr) = "
+                    f"{self.best_param[3]:.3f} "
+                    f"+/- {param_sig[3]:.3f}"
+                )
+
+                print(
+                    "   - mu in Dec (mas/yr) = "
+                    f"{self.best_param[4]:.3f} "
+                    f"+/- {param_sig[4]:.3f}"
+                )
+
+                print("\nBest-fit orbit:")
+
+                print(
+                    "   - Period (days) = "
+                    f"{self.best_param[5]:.3f} "
+                    f"+/- {param_sig[5]:.3f}"
+                )
+
+                print(
+                    "   - Eccentricity = "
+                    f"{self.best_param[6]:.3f} "
+                    f"+/- {param_sig[6]:.3f}"
+                )
+
+                print(
+                    "   - Relative time of periastron = "
+                    f"{self.best_param[7]:.3f} "
+                    f"+/- {param_sig[7]:.3f}"
+                )
+
+                print(
+                    "   - Semi-major axis of photocenter (mas) = "
+                    f"{self.best_param[8]:.3f} "
+                    f"+/- {param_sig[8]:.3f}"
+                )
+
+                print(
+                    "   - Inclination (deg) = "
+                    f"{np.degrees(self.best_param[9]):.3f} "
+                    f"+/- {np.degrees(param_sig[9]):.3f}"
+                )
+
+                print(
+                    "   - Argument of periastron (deg) = "
+                    f"{np.degrees(self.best_param[10]):.3f} "
+                    f"+/- {np.degrees(param_sig[10]):.3f}"
+                )
+
+                print(
+                    "   - PA of ascending node (deg) = "
+                    f"{np.degrees(self.best_param[11]):.3f} "
+                    f"+/- {np.degrees(param_sig[11]):.3f}"
+                )
+
+                if inc_jitter:
+                    print(
+                        "   - Jitter (mas) = "
+                        f"{self.best_param[12]:.3f} "
+                        f"+/- {param_sig[12]:.3f}"
+                    )
+
+                print(f"\nNumber of function evaluations: {result.nfev}")
+                print(f"Number of Jacobian evaluations: {result.njev}")
+
+                print("\nDerived parameters:")
+                print(f"   - Relative semi-major axis (au) = {sma:.3f}")
+                print(f"   - Mass function (Msun) = {f_mass:.3e}")
+                print(f"   - Companion mass (Msun) = {mass_2:.3e}")
 
             if inc_jitter:
                 # Remove the jitter parameter

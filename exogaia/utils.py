@@ -264,6 +264,7 @@ def thiele_innes_to_campbell(
     source_id: typing.Optional[typing.Union[int, np.int64]],
     sma_0: Real,
     model_param: np.ndarray,
+    verbose: bool = True,
 ) -> np.ndarray:
     """
     Convert Thiele–Innes orbital parameters into Campbell elements.
@@ -298,6 +299,8 @@ def thiele_innes_to_campbell(
         - ``model_param[9]`` : orbital period (days)
         - ``model_param[10]`` : eccentricity
         - ``model_param[11]`` : time of periastron passage
+    verbose : bool
+        Print some information (default: True).
 
     Returns
     -------
@@ -351,14 +354,17 @@ def thiele_innes_to_campbell(
     nss_source = NssSource(star=df_in, indice=0)
     df_campbell = nss_source.campbell()
 
-    print("\nConversion to campbell elements:")
-    print(f"   - Period = {model_param[9]:.3f} days")
-    print(f"   - Eccentricity = {model_param[10]:.3f}")
-    print(f"   - Relative time of periastron = {model_param[11]:.3f}")
-    print(f"   - Semi-major axis of photocenter (mas) = {sma_0:.3f}")
-    print(f"   - Inclination (deg) = {df_campbell['inclination'][0]:.3f}")
-    print(f"   - Argument of periastron (deg) = {df_campbell['arg_periastron'][0]:.3f}")
-    print(f"   - PA of ascending node (deg) = {df_campbell['nodeangle'][0]:.3f}")
+    if verbose:
+        print("\nConversion to campbell elements:")
+        print(f"   - Period = {model_param[9]:.3f} days")
+        print(f"   - Eccentricity = {model_param[10]:.3f}")
+        print(f"   - Relative time of periastron = {model_param[11]:.3f}")
+        print(f"   - Semi-major axis of photocenter (mas) = {sma_0:.3f}")
+        print(f"   - Inclination (deg) = {df_campbell['inclination'][0]:.3f}")
+        print(
+            f"   - Argument of periastron (deg) = {df_campbell['arg_periastron'][0]:.3f}"
+        )
+        print(f"   - PA of ascending node (deg) = {df_campbell['nodeangle'][0]:.3f}")
 
     param_list = np.hstack(
         [
