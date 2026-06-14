@@ -122,8 +122,8 @@ class OccurrenceRate(ExoGaia):
                 f"{self.mass_range[0]:.2f} - {self.mass_range[1]:.2f}"
             )
 
-            if isinstance(self.primary_mass, Real):
-                print(f"\nPrimary mass (Msun): {primary_mass:.2f}")
+            if self.primary_mass.size == 1:
+                print(f"\nPrimary mass (Msun): {primary_mass[0]:.2f}")
 
             else:
                 print(
@@ -397,11 +397,11 @@ class OccurrenceRate(ExoGaia):
             elif len(sma_list) > 1:
                 print(
                     "\nSemi-major axis range (au) = "
-                    f"{np.min(sma_list):.2f} - {np.max(sma_list):.2f}"
+                    f"{np.nanmin(sma_list):.2f} - {np.nanmax(sma_list):.2f}"
                 )
                 print(
                     "Companion mass range (Msun) = "
-                    f"{np.min(mass_list):.2e} - {np.max(mass_list):.2e}"
+                    f"{np.nanmin(mass_list):.2e} - {np.nanmax(mass_list):.2e}"
                 )
 
         return sma_list, mass_list

@@ -29,7 +29,6 @@ from exogaia.utils import (
     calc_sma_from_ti,
     calc_mass_from_sma,
     param_list_to_dict,
-    orbit_sky,
     thiele_innes_to_campbell,
 )
 
@@ -1480,8 +1479,7 @@ class LeastSquares(ExoGaia):
         n_sigma : list(float)
             List with the number of sigmas for for contours
             will be drawn when the argument of ``map_type``
-            is set to 'chi2_det' or 'chi2_param'
-            (default: [1, 3, 5]).
+            is set to 'chi2_param' (default: [1, 3, 5]).
 
         Returns
         -------
@@ -1624,6 +1622,7 @@ class LeastSquares(ExoGaia):
         global_sigma = np.sqrt(np.diag(global_cov))
 
         # Calculate the semi-major axis of the photocenter (mas)
+        # The TI elements in global_param are in mas
 
         sma_0, sma_0_sigma = calc_sma_from_ti(global_param, global_cov)
 
@@ -1633,9 +1632,9 @@ class LeastSquares(ExoGaia):
             sma_0, global_param[9], global_param[2], self.primary_mass[0]
         )
 
-        # Relative semi-major axis (i.e. a = a1 + a2) in mas
+        # Relative semi-major axis (i.e. a = a1 + a2) in au
         # Primary and companion masses in Msun
-        # global_param[9] = period
+        # global_param[9] = period (days)
 
         sma = ((global_param[9] / 365.25) ** 2 * (self.primary_mass[0] + mass_2)) ** (
             1.0 / 3.0
@@ -1786,32 +1785,6 @@ class LeastSquares(ExoGaia):
                     fontsize=13.0,
                 )
 
-                # Two-sided Gaussian probabilities
-                q_chi2 = norm.cdf(n_sigma) - norm.cdf(-n_sigma)
-
-                # Extra fitted orbital parameters:
-                # P, e, T0, and A, B, F, G (TI constants)
-                df_chi2 = 7
-
-                # Delta chi2 = chi2_5param - chi2_orbit
-                delta_chi2_levels = chi2.ppf(q=q_chi2, df=df_chi2)
-
-                cs = ax.contour(
-                    x_grid,
-                    y_grid,
-                    map_grid_2d.T,
-                    levels=delta_chi2_levels,
-                    colors="white",
-                    linestyles="--",
-                    linewidths=0.7,
-                )
-
-                fmt = {}
-                for sig_idx, sig_item in enumerate(n_sigma):
-                    fmt[delta_chi2_levels[sig_idx]] = rf"{sig_item}$\sigma$"
-
-                ax.clabel(cs, fmt=fmt, inline=True, inline_spacing=10, fontsize=7)
-
             elif map_type == "chi2_param":
                 cb.ax.set_ylabel(
                     r"$\chi^2 - \chi^2_\mathrm{min}$",
@@ -1944,8 +1917,8 @@ class LeastSquares(ExoGaia):
                 -100.0,  # (mas)
                 -100.0,  # (mas)
                 0.0,  # (mas)
-                -1000.0,  # (mas/yr)
-                -1000.0,  # (mas/yr)
+                -2000.0,  # (mas/yr)
+                -2000.0,  # (mas/yr)
                 10.0,  # (days)
                 0.0,
                 0.0,
@@ -1960,9 +1933,9 @@ class LeastSquares(ExoGaia):
             [
                 100.0,  # (mas)
                 100.0,  # (mas)
-                100.0,  # (mas)
-                1000.0,  # (mas/yr)
-                1000.0,  # (mas/yr)
+                1000.0,  # (mas)
+                2000.0,  # (mas/yr)
+                2000.0,  # (mas/yr)
                 1e5,  # (days)
                 0.99999,
                 1.0,
@@ -2062,7 +2035,7 @@ class LeastSquares(ExoGaia):
                 primary_mass=self.primary_mass[0],
             )
 
-            # Relative semi-major axis (i.e. a = a1 + a2) in mas
+            # Relative semi-major axis (i.e. a = a1 + a2) in au
             # Primary and companion masses in Msun
 
             sma = (
@@ -2392,7 +2365,8 @@ class LeastSquares(ExoGaia):
                     label="Barycenter",
                 )
 
-                # Time of periastron in Julian years
+                # Position at time of periastron (in Julian years)
+
                 t_per = (
                     self.ref_epoch.value
                     + (self.best_param[5] * self.best_param[7]) / 365.25
@@ -2402,6 +2376,17 @@ class LeastSquares(ExoGaia):
                     model_param,
                     obs_time=np.array([t_per]),
                 )
+
+                # Position at time of apastron (in Julian years)
+
+                period_years = self.best_param[5] / 365.25
+
+                delta_ra_ap, delta_dec_ap = kepler_model.calc_orbit(
+                    model_param,
+                    obs_time=np.array([t_per + 0.5 * period_years]),
+                )
+
+                # Plot periastron and line of nodes
 
                 axs[1].plot(
                     delta_ra_per,
@@ -2415,18 +2400,9 @@ class LeastSquares(ExoGaia):
                     label=rf"Periastron ($t_\mathrm{{per}} = {t_per:.2f}$)",
                 )
 
-                x_nodes, y_nodes = orbit_sky(
-                    nu=np.array([self.best_param[10], np.pi + self.best_param[10]]),
-                    sma=self.best_param[8],
-                    ecc=self.best_param[6],
-                    inc=self.best_param[9],
-                    aop=self.best_param[10],
-                    pan=self.best_param[11],
-                )
-
                 axs[1].plot(
-                    x_nodes,
-                    y_nodes,
+                    [delta_ra_per, delta_ra_ap],
+                    [delta_dec_per, delta_dec_ap],
                     ls=":",
                     lw=1,
                     marker="none",

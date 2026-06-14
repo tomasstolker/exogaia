@@ -175,6 +175,7 @@ class EpochAstrometry(ExoGaia):
         csv_out: typing.Optional[str] = None,
         reject_fraction: typing.Optional[Real] = None,
         seed: typing.Optional[int] = None,
+        allow_reject: bool = True,
     ) -> typing.Dict[str, Real]:
         """
         Simulate the epoch astrometry for a single star or binary
@@ -249,12 +250,11 @@ class EpochAstrometry(ExoGaia):
                     distribution between 0.0 and 2pi if the parameter
                     is not included.
                 - 'sma' : float
-                    Semi-major axis (au). This should be the relative
-                    semi-major axis of the primary and secondary,
-                    so sma = a1 + a2. A random value will be drawn from
-                    a log-uniform distribution between 0.1 and 30 au
-                    if the argument is set to ``None``.
-
+                    Relative semi-major axis (au). This should be
+                    the relative semi-major axis of the primary and
+                    secondary, so sma = a1 + a2. A random value will
+                    be drawn from a log-uniform distribution between
+                    0.1 and 30 au if the argument is set to ``None``.
         mass_2 : float, None
             Companion mass (Msun). A single star is simulated
             by setting the argument of both ``mass_2`` and
@@ -272,12 +272,12 @@ class EpochAstrometry(ExoGaia):
         occ_rate : str, OccurrenceRate, None
             Occurrence-rate prescription ("fls_fulton2021",
             "gpi_nielsen2019") for sampling the companion
-            mass, ``mass_2``, and the semi-major axis,
-            ``sma``. Or, an ``OccurrenceRate`` object, which
-            also allows for a manually provided occurrence
-            rate function. The argument of ``mass_2`` will
-            be ignored if the argument of ``occ_rate`` is
-            not set to ``None``.
+            mass, ``mass_2``, and the semi-major. Or, an
+            ``OccurrenceRate`` object, which also allows
+            for a manually provided occurrence rate
+            function. The arguments of ``mass_2`` and
+            ``sma_rel`` will be ignored if the argument
+            of ``occ_rate`` is not set to ``None``.
         sigma_per_ccd : float, None
             The AL uncertainty per CCD (mas). Setting the
             argument to ``None`` will adopt the G magnitude
@@ -293,11 +293,19 @@ class EpochAstrometry(ExoGaia):
             Seed for the random number generator. Random seed is
             used if set to ``None``. Set the argument to a
             positive integer for reproducibility.
+        allow_reject : bool
+            If ``True`` (default) and ``occ_rate`` is not ``None``,
+            each star hosts a planet with probability equal to its
+            integrated occurrence rate. If ``False``, every star
+            is forced to host exactly one planet.
 
         Returns
         -------
         dict
-            Dictionary with the model parameters.
+            Dictionary with the model parameters. Important!
+            The ``sma`` in the dictionary is the semi-major
+            axis of the photocenter (mas), assuming an
+            unresolved binary orbit.
         """
 
         rng = np.random.default_rng(seed=seed)
@@ -410,7 +418,7 @@ class EpochAstrometry(ExoGaia):
 
         # Simulating single star or binary system?
 
-        if mass_2 is None or np.isnan(mass_2) and occ_rate is None:
+        if (mass_2 is None or np.isnan(mass_2)) and occ_rate is None:
             binary = False
 
         else:
@@ -437,14 +445,21 @@ class EpochAstrometry(ExoGaia):
                         verbose=self.verbose,
                     )
 
-                sma, mass_2 = occ_rate.sample_planets(allow_reject=True)
-                sma, mass_2 = sma[0], mass_2[0]
+                if "sma" not in model_param:
+                    if mass_2 is None:
+                        sma, mass_2 = occ_rate.sample_planets(allow_reject=allow_reject)
+                        mass_2 = mass_2[0]
 
-                if np.isnan(sma):
-                    binary = False
+                    else:
+                        sma, _ = occ_rate.sample_planets(allow_reject=allow_reject)
 
-                else:
-                    model_param["sma"] = sma
+                    sma = sma[0]
+
+                    if np.isnan(sma):
+                        binary = False
+
+                    else:
+                        model_param["sma"] = sma
 
             if binary:
                 if "ecc" not in model_param:
@@ -631,21 +646,21 @@ class EpochAstrometry(ExoGaia):
                 print(f"   - Flux ratio = {flux_ratio:.2e}")
                 print(f"   - Relative semi-major axis (au) = {model_param['sma']:.2f}")
 
-            # Convert semi-major axis from au to mas
-
-            model_param["sma"] *= model_param["parallax"]
-
         # Calculate the 1D astrometry of the stellar track
         # self is the current EpochAstrometry object
 
         star_model = StarModel(epoch_astrometry=self, verbose=self.verbose)
 
-        cen_pos = star_model.calc_1d_model(model_param=model_param, calc_parallax=False)
+        cen_pos = star_model.calc_1d_model(model_param=model_param)
 
         sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
         cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
 
         if binary:
+            # Convert relative semi-major axis from (au) to (mas)
+
+            model_param["sma"] *= model_param["parallax"]
+
             # Add the component from the binary orbit, using the
             # relative semi-major axis (mas) in model_param
 
@@ -655,7 +670,8 @@ class EpochAstrometry(ExoGaia):
             )
 
             delta_ra, delta_dec = kepler_model.calc_orbit(
-                model_param=model_param, obs_time=None
+                model_param=model_param,
+                obs_time=None,
             )
 
             delta_eta_rel = delta_ra * sin_scan_ang + delta_dec * cos_scan_ang
@@ -665,6 +681,26 @@ class EpochAstrometry(ExoGaia):
             cen_pos += binary_bias(
                 delta_eta_rel, mass_ratio, flux_ratio, verbose=self.verbose
             )
+
+            # Convert semi-major axis from relative to photocenter (mas)
+
+            f_term = flux_ratio / (1.0 + flux_ratio)
+            m_term = mass_ratio / (1.0 + mass_ratio)
+
+            model_param["sma"] *= f_term - m_term
+            model_param["sma"] = abs(model_param["sma"])
+
+            # Convert argument of periastron from relative to photocenter (mas)
+
+            model_param["aop"] = (model_param["aop"] + np.pi) % (2.0 * np.pi)
+
+            if self.verbose:
+                print(f"\nPhotocenter semi-major axis (mas) = {model_param['sma']:.2f}")
+
+                print(
+                    "Photocenter argument of periastron "
+                    f"(rad) = {model_param['aop']:.2f}"
+                )
 
         cen_pos += rng.normal(loc=0.0, scale=sigma_per_transit, size=len(psi))
 

@@ -17,7 +17,7 @@ from scipy.stats import norm
 
 from exogaia.core import ExoGaia
 from exogaia.models import KeplerModel
-from exogaia.utils import orbit_sky, param_list_to_dict
+from exogaia.utils import param_list_to_dict
 
 
 class SamplingResults(ExoGaia):
@@ -583,14 +583,27 @@ class SamplingResults(ExoGaia):
             label="Barycenter",
         )
 
-        # Time of periastron in Julian years
+        # Position at time of periastron (in Julian years)
+
         t_per = (
             self.ref_epoch.value + (model_param["per"] * model_param["tau"]) / 365.25
         )
 
         delta_ra_per, delta_dec_per = kepler_model.calc_orbit(
-            model_param, obs_time=np.array([t_per])
+            model_param,
+            obs_time=np.array([t_per]),
         )
+
+        # Position at time of apastron (in Julian years)
+
+        period_years = model_param["per"] / 365.25
+
+        delta_ra_ap, delta_dec_ap = kepler_model.calc_orbit(
+            model_param,
+            obs_time=np.array([t_per + 0.5 * period_years]),
+        )
+
+        # Plot periastron and line of nodes
 
         plt.plot(
             delta_ra_per,
@@ -604,18 +617,9 @@ class SamplingResults(ExoGaia):
             label=rf"Periastron ($t_\mathrm{{per}} = {t_per:.2f}$)",
         )
 
-        x_nodes, y_nodes = orbit_sky(
-            nu=np.array([model_param["aop"], np.pi + model_param["aop"]]),
-            sma=model_param["sma"],
-            ecc=model_param["ecc"],
-            inc=model_param["inc"],
-            aop=model_param["aop"],
-            pan=model_param["pan"],
-        )
-
         plt.plot(
-            x_nodes,
-            y_nodes,
+            [delta_ra_per, delta_ra_ap],
+            [delta_dec_per, delta_dec_ap],
             ls=":",
             lw=1,
             marker="none",

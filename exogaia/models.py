@@ -17,7 +17,7 @@ from beartype import beartype, typing
 from matplotlib.figure import Figure
 
 from exogaia.core import ExoGaia
-from exogaia.utils import param_dict_to_list, orbit_sky
+from exogaia.utils import param_dict_to_list
 
 
 class StarModel(ExoGaia):
@@ -218,25 +218,27 @@ class StarModel(ExoGaia):
         # Add accelerations components
 
         if "pm_dot_ra" in model_param and "pm_dot_dec" in model_param:
-            print(
-                f"   - PM acceleration in RA (mas/yr^2) = {model_param['pm_dot_ra']:.3f}"
-            )
-            print(
-                f"   - PM acceleration in Dec (mas/yr^2) = {model_param['pm_dot_dec']:.3f}"
-            )
+            if self.verbose:
+                print(
+                    f"   - PM acceleration in RA (mas/yr^2) = {model_param['pm_dot_ra']:.3f}"
+                )
+                print(
+                    f"   - PM acceleration in Dec (mas/yr^2) = {model_param['pm_dot_dec']:.3f}"
+                )
 
             delta_ra += 0.5 * rel_year**2 * model_param["pm_dot_ra"]
             delta_dec += 0.5 * rel_year**2 * model_param["pm_dot_dec"]
 
         if "pm_dotdot_ra" in model_param and "pm_dotdot_dec" in model_param:
-            print(
-                "   - PM acceleration derivative in RA "
-                f"(mas/yr^3) = {model_param['pm_dotdot_ra']:.3f}"
-            )
-            print(
-                "   - PM acceleration derivative in Dec "
-                f"(mas/yr^3) = {model_param['pm_dotdot_dec']:.3f}"
-            )
+            if self.verbose:
+                print(
+                    "   - PM acceleration derivative in RA "
+                    f"(mas/yr^3) = {model_param['pm_dotdot_ra']:.3f}"
+                )
+                print(
+                    "   - PM acceleration derivative in Dec "
+                    f"(mas/yr^3) = {model_param['pm_dotdot_dec']:.3f}"
+                )
 
             delta_ra += (1.0 / 6.0) * rel_year**3 * model_param["pm_dotdot_ra"]
             delta_dec += (1.0 / 6.0) * rel_year**3 * model_param["pm_dotdot_dec"]
@@ -336,32 +338,35 @@ class StarModel(ExoGaia):
                 delta_pos += 0.5 * rel_year**2 * model_param["pm_dot_ra"]
                 delta_pos += 0.5 * rel_year**2 * model_param["pm_dot_dec"]
 
-                print(
-                    f"   - PM acceleration in RA (mas/yr^2) = {model_param['pm_dot_ra']:.3f}"
-                )
-                print(
-                    f"   - PM acceleration in Dec (mas/yr^2) = {model_param['pm_dot_dec']:.3f}"
-                )
+                if self.verbose:
+                    print(
+                        f"   - PM acceleration in RA (mas/yr^2) = {model_param['pm_dot_ra']:.3f}"
+                    )
+                    print(
+                        f"   - PM acceleration in Dec (mas/yr^2) = {model_param['pm_dot_dec']:.3f}"
+                    )
 
             if "pm_dotdot_ra" in model_param and "pm_dotdot_dec" in model_param:
                 delta_pos += (1.0 / 6.0) * rel_year**3 * model_param["pm_dotdot_ra"]
                 delta_pos += (1.0 / 6.0) * rel_year**3 * model_param["pm_dotdot_dec"]
 
-                print(
-                    "   - PM acceleration derivative in RA "
-                    f"(mas/yr^3) = {model_param['pm_dotdot_ra']:.3f}"
-                )
-                print(
-                    "   - PM acceleration derivative in Dec "
-                    f"(mas/yr^3) = {model_param['pm_dotdot_dec']:.3f}"
-                )
+                if self.verbose:
+                    print(
+                        "   - PM acceleration derivative in RA "
+                        f"(mas/yr^3) = {model_param['pm_dotdot_ra']:.3f}"
+                    )
+                    print(
+                        "   - PM acceleration derivative in Dec "
+                        f"(mas/yr^3) = {model_param['pm_dotdot_dec']:.3f}"
+                    )
 
         return delta_pos
 
 
 class KeplerModel(ExoGaia):
     """
-    Class with a Kepler model for simulating 1D astrometry.
+    Class with a Kepler model for simulating 1D
+    and 2D astrometry.
     """
 
     @beartype
@@ -507,8 +512,7 @@ class KeplerModel(ExoGaia):
         obs_time: typing.Optional[np.ndarray] = None,
     ) -> typing.Tuple[np.ndarray, np.ndarray]:
         """
-        Method for calculating the orbital model, using the 5
-        parameters for the stellar track and the
+        Method for calculating the astrometric orbit on the sky.
 
         Parameters
         ----------
@@ -516,12 +520,13 @@ class KeplerModel(ExoGaia):
             Dictionary with the model parameters. The mandatory
             parameters are the period (days), ``per``, eccentricity,
             ``ecc``, relative time of periastron, ``tau``, semi-major
-            axis (mas), ``sma``, inclination (rad), ``inc``, argument of
-            periastron (rad), ``aop``, and position angle of ascending
-            node (rad), ``pan``. Optionally, the dictionary may also
-            include ``ra_offset`` (mas), ``dec_offset`` (mas),
-            ``parallax`` (mas), ``pm_ra`` (mas/yr), and ``pm_dec``
-            (mas/yr), but these parameters are not used.
+            axis (mas), ``sma``, inclination (rad), ``inc``,
+            argument of periastron (rad), ``aop``, and position angle
+            of ascending node (rad), ``pan``. Optionally, the
+            dictionary may also include ``ra_offset`` (mas),
+            ``dec_offset`` (mas), ``parallax`` (mas), ``pm_ra``
+            (mas/yr), and ``pm_dec`` (mas/yr), but these parameters
+            are not used.
         obs_time : np.ndarray, None
             Array with the observing epochs in Julian years on the TCB
             scale. The epochs are selected from the ``EpochAstrometry``
@@ -530,11 +535,11 @@ class KeplerModel(ExoGaia):
         Returns
         -------
         np.ndarray
-            Array with the RA coordinates (mas) relative to the
-            system's barycenter.
+            Array with the RA coordinates (mas) relative
+            to the system's barycenter.
         np.ndarray
-            Array with the Dec coordinates (mas) relative to the
-            system's barycenter.
+            Array with the Dec coordinates (mas) relative
+            to the system's barycenter.
         """
 
         if self.verbose:
@@ -556,6 +561,7 @@ class KeplerModel(ExoGaia):
             print(f"   - PA of ascending node (deg) = {pan_deg:.3f}")
 
         # Calculate the Thiele-Innes elements
+        # sma is in mas, so the TI elements are also in mas
 
         thiele_innes_a, thiele_innes_b, thiele_innes_f, thiele_innes_g = (
             self.thiele_innes(
@@ -567,6 +573,8 @@ class KeplerModel(ExoGaia):
         )
 
         # Solve the Kepler equation
+        # x_orb and y_orb are a dimensionless ellipse
+        # so should be scaled by the semi-major axis
 
         x_orb, y_orb = self.solve_kepler(
             model_param["per"], model_param["ecc"], model_param["tau"], obs_time
@@ -575,7 +583,7 @@ class KeplerModel(ExoGaia):
         # Rotate (x_orb, y_orb) into sky plane (x_sky, y_sky)
         # See Eq. 9 in Holl et al. (2023)
         # The units of x_sky and y_sky are mas
-        # because the units of sma is mas
+        # because the units of sma in thiele_innes are mas
 
         x_sky = thiele_innes_b * x_orb + thiele_innes_g * y_orb
         y_sky = thiele_innes_a * x_orb + thiele_innes_f * y_orb
@@ -595,6 +603,21 @@ class KeplerModel(ExoGaia):
         #
         #         x_sky *= pos_scaling
         #         y_sky *= pos_scaling
+
+        # if mas_units:
+        #     # Convert by default from (au) to (mas)
+        #     # unless parallax is not part of model_param
+        #     if "parallax" in model_param:
+        #         x_sky *= model_param["parallax"]
+        #         y_sky *= model_param["parallax"]
+        #
+        #     else:
+        #         raise ValueError(
+        #             "To return the orbit in mas, 'parallax' "
+        #             "should be part of 'model_param'. You can "
+        #             "set 'mas_units=False' to return the orbit "
+        #             "astrometry in au."
+        #         )
 
         return x_sky, y_sky
 
@@ -645,7 +668,10 @@ class KeplerModel(ExoGaia):
 
         # Orbit
 
-        delta_ra_orbit, delta_dec_orbit = self.calc_orbit(model_param, obs_time)
+        delta_ra_orbit, delta_dec_orbit = self.calc_orbit(
+            model_param,
+            obs_time,
+        )
 
         # Total RA/Dec offset
 
@@ -743,8 +769,8 @@ class KeplerModel(ExoGaia):
         model_param: typing.Dict[str, Real],
     ) -> np.ndarray:
         """
-        Calculate the residuals of the 1D model astrometry with
-        respect to the Gaia epoch astrometry.
+        Calculate the residuals of the 1D model astrometry
+        with respect to the Gaia epoch astrometry.
 
         Parameters
         ----------
@@ -873,6 +899,15 @@ class KeplerModel(ExoGaia):
             obs_time=np.array([t_per]),
         )
 
+        # Position at time of apastron (in Julian years)
+
+        period_years = model_param["per"] / 365.25
+
+        delta_ra_ap, delta_dec_ap = self.calc_orbit(
+            model_param,
+            obs_time=np.array([t_per + 0.5 * period_years]),
+        )
+
         # Orbit model at Gaia epochs
 
         delta_ra, delta_dec = self.calc_orbit(
@@ -887,12 +922,11 @@ class KeplerModel(ExoGaia):
 
         # Calculate residuals
 
+        print(model_param)
         residuals = self.calc_residuals(model_param)
 
-        res_ra, res_dec = (
-            sin_scan_ang * residuals,
-            cos_scan_ang * residuals,
-        )
+        res_ra = sin_scan_ang * residuals
+        res_dec = cos_scan_ang * residuals
 
         fig = plt.figure(figsize=(4, 4))
         ax = plt.gca()
@@ -909,10 +943,10 @@ class KeplerModel(ExoGaia):
         )
 
         for i, res_item in enumerate(residuals):
-            x1 = delta_ra[i] + sin_scan_ang[i] * (res_item + obs_err)
-            x2 = delta_ra[i] + sin_scan_ang[i] * (res_item - obs_err)
-            y1 = delta_dec[i] + cos_scan_ang[i] * (res_item + obs_err)
-            y2 = delta_dec[i] + cos_scan_ang[i] * (res_item - obs_err)
+            x1 = delta_ra[i] + sin_scan_ang[i] * (res_item + obs_err[i])
+            x2 = delta_ra[i] + sin_scan_ang[i] * (res_item - obs_err[i])
+            y1 = delta_dec[i] + cos_scan_ang[i] * (res_item + obs_err[i])
+            y2 = delta_dec[i] + cos_scan_ang[i] * (res_item - obs_err[i])
 
             plt.plot([x1, x2], [y1, y2], "-", lw=1, color="black")
 
@@ -962,6 +996,8 @@ class KeplerModel(ExoGaia):
             label="Barycenter",
         )
 
+        # Plot periastron and line of nodes
+
         plt.plot(
             delta_ra_per,
             delta_dec_per,
@@ -974,18 +1010,9 @@ class KeplerModel(ExoGaia):
             label=rf"Periastron ($t_\mathrm{{per}} = {t_per:.2f}$)",
         )
 
-        x_nodes, y_nodes = orbit_sky(
-            nu=np.array([model_param["aop"], np.pi + model_param["aop"]]),
-            sma=model_param["sma"],
-            ecc=model_param["ecc"],
-            inc=model_param["inc"],
-            aop=model_param["aop"],
-            pan=model_param["pan"],
-        )
-
         plt.plot(
-            x_nodes,
-            y_nodes,
+            [delta_ra_per, delta_ra_ap],
+            [delta_dec_per, delta_dec_ap],
             ls=":",
             lw=1,
             marker="none",
