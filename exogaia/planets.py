@@ -123,13 +123,13 @@ class OccurrenceRate(ExoGaia):
             )
 
             if self.primary_mass.size == 1:
-                print(f"\nPrimary mass (Msun): {primary_mass[0]:.2f}")
+                print(f"\nPrimary mass (Msun): {self.primary_mass[0]:.2f}")
 
             else:
                 print(
                     "\nPrimary mass range (Msun): "
-                    f"{np.min(primary_mass):.2f} - "
-                    f"{np.max(primary_mass):.2f}"
+                    f"{np.min(self.primary_mass):.2f} - "
+                    f"{np.max(self.primary_mass):.2f}"
                 )
 
         self.log_sma_edges = None

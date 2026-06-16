@@ -24,7 +24,7 @@ dependencies = [
     "emcee",
     "h5py",
     "healpy",
-    "initial-mass-function",
+    "initial-mass-function<2026",
     "kepler.py",
     "matplotlib",
     "numpy",

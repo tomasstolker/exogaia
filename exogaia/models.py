@@ -922,7 +922,6 @@ class KeplerModel(ExoGaia):
 
         # Calculate residuals
 
-        print(model_param)
         residuals = self.calc_residuals(model_param)
 
         res_ra = sin_scan_ang * residuals

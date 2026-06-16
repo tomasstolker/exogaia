@@ -683,6 +683,7 @@ class EpochAstrometry(ExoGaia):
             )
 
             # Convert semi-major axis from relative to photocenter (mas)
+            # This assumes an unresolved binary
 
             f_term = flux_ratio / (1.0 + flux_ratio)
             m_term = mass_ratio / (1.0 + mass_ratio)
@@ -965,7 +966,7 @@ class EpochAstrometry(ExoGaia):
 
         model_param = {
             "ra": self.ra,
-            "self.dec": self.dec,
+            "dec": self.dec,
             "parallax": self.parallax,
             "pm_ra": self.pm_ra,
             "pm_dec": self.pm_dec,
