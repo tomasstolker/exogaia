@@ -412,8 +412,10 @@ class KeplerModel(ExoGaia):
         ecc : float
             Eccentricity.
         tau : float
-            Time of periastron, as fraction of the period,
-            relative to ``ref_epoch``.
+            Time of periastron passage relative to ``ref_epoch``, expressed as
+            a fraction of the orbital period. Thus ``tau=0`` means periastron
+            occurs at ``ref_epoch``, ``tau=0.5`` means periastron occurs half
+            a period after ``ref_epoch``.
         obs_time : np.ndarray, None
             Array with the observing epochs in Julian years on the TCB
             scale. The epochs are selected from the ``EpochAstrometry``
@@ -443,7 +445,7 @@ class KeplerModel(ExoGaia):
         # rel_time_day: observation times in days relative to ref_epoch
         # delta_t: observation times relative to time of periastron
         delta_t = rel_time_day - t_per
-
+        
         # Mean anomaly at observation epochs
         mean_anom_obs = delta_t * 2.0 * np.pi / per
 

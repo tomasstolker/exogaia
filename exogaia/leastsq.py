@@ -1510,7 +1510,7 @@ class LeastSquares(ExoGaia):
         chi2_5param = self.chi2
 
         # Grid for the log10(P/days)
-        logp_list = np.linspace(np.log10(1e2), np.log10(1e5), n_points)
+        logp_list = np.linspace(np.log10(5e1), np.log10(1e5), n_points)
 
         # Grid for the eccentricity
         ecc_list = np.linspace(1e-6, 1.0 - 1e-6, n_points, endpoint=False)
