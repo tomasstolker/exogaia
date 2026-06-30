@@ -565,10 +565,6 @@ def binary_bias(
         Compute the astrometric centroid bias for a marginally
         resolved binary assuming a Gaussian line-spread function.
 
-        See for details Appendix E in the `ESA's Gaia public documents
-        <https://www.cosmos.esa.int/web/gaia/public-dpac-documents>`_
-        by L. Lindegren.
-
         The model assumes:
         (i) both components have identical Gaussian LSFs,
         (ii) the measured centroid is given by the mode of

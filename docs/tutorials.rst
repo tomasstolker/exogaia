@@ -24,6 +24,9 @@ Below you can find tutorials that highlight the functionalities of ``exogaia``. 
 - :doc:`tutorials/gaia_bh3`
   – Analyse the DR4 epoch astrometry of Gaia BH3
 
+- :doc:`tutorials/dr4_pre-release`
+  – Analyse DR4 pre-release epoch astrometry
+
 - :doc:`tutorials/completeness`
   – Compute a DR4/DR5 completeness map for a Gaia source
 
@@ -39,5 +42,6 @@ Below you can find tutorials that highlight the functionalities of ``exogaia``. 
    tutorials/binary_orbit.ipynb
    tutorials/stellar_companion.ipynb
    tutorials/gaia_bh3.ipynb
+   tutorials/dr4_pre-release.ipynb
    tutorials/completeness.ipynb
    tutorials/occurrence_rate.ipynb

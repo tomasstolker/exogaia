@@ -15,7 +15,7 @@ class TestExoGaia:
 
         self.epoch_astrom = EpochAstrometry(primary_mass=None, gaia_release="DR4")
 
-        self.epoch_astrom.gaia_bh3(exclude_outliers=True, combine_ccds=True)
+        self.epoch_astrom.retrieve_gaia_bh3(exclude_outliers=True, combine_ccds=True)
 
         self.least_squares = LeastSquares(epoch_astrometry=self.epoch_astrom)
 

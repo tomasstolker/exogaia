@@ -164,6 +164,61 @@ class EpochAstrometry(ExoGaia):
                 "relative_time_year"
             ] * u.year.to(u.day)
 
+    @staticmethod
+    @beartype
+    def _interpolate_u0(g_mag: Real, nu_eff: Real) -> Real:
+        """
+        Interpolate the normalization factor u0 that is
+        used to convert UWE into RUWE. This factor
+        depends on the stellar magnitude and effective
+        wavenumber.
+
+        Determined from the re-normalised Unit Weight Error (RUWE)
+        tables of u0(g,c) by L. Lindegren (2023 Sep 13)
+        https://www.cosmos.esa.int/web/gaia/dr3-auxiliary-data
+
+        Parameters
+        ----------
+        g_mag : float
+            Gaia G magnitude.
+        nu_eff : float
+            Effective wavenumber (µm⁻¹).
+
+        Returns
+        -------
+        float
+            The u0 normalization.
+        """
+
+        file_folder = Path(__file__).resolve().parent.parent
+        data_file = file_folder / "data" / "table_u0_g_c_p5.txt"
+
+        norm_g_mag, norm_nu_eff, norm_u0 = np.loadtxt(
+            data_file,
+            skiprows=1,
+            delimiter=",",
+            unpack=True,
+        )
+
+        g_vals = np.unique(norm_g_mag)
+        c_vals = np.unique(norm_nu_eff)
+
+        u0_grid = norm_u0.reshape(g_vals.size, c_vals.size)
+
+        # Should look the same as plot_u0_g_c_p5.pdf
+        # plt.pcolormesh(g_vals, c_vals, u0_grid.T, cmap='rainbow')
+        # plt.colorbar()
+        # plt.show()
+
+        u0_interp = RegularGridInterpolator(
+            (g_vals, c_vals),
+            u0_grid,
+            method="linear",
+            bounds_error=True,
+        )
+
+        return float(u0_interp((g_mag, nu_eff)))
+
     @beartype
     def simulate_data(
         self,
@@ -900,32 +955,11 @@ class EpochAstrometry(ExoGaia):
         # tables of u0(g,c) by L. Lindegren (2023 Sep 13)
         # https://www.cosmos.esa.int/web/gaia/dr3-auxiliary-data
 
-        if nu_eff is not None:
-            file_folder = Path(__file__).resolve().parent.parent
-            data_file = file_folder / "data/table_u0_g_c_p5.txt"
-
-            norm_g_mag, norm_nu_eff, norm_u0 = np.loadtxt(
-                data_file, skiprows=1, delimiter=",", unpack=True
-            )
-
-            g_vals = np.unique(norm_g_mag)
-            c_vals = np.unique(norm_nu_eff)
-
-            u0_grid = np.reshape(norm_u0, (g_vals.size, c_vals.size))
-
-            # Should look the same as plot_u0_g_c_p5.pdf
-            # plt.pcolormesh(g_vals, c_vals, u0_grid.T, cmap='rainbow')
-            # plt.colorbar()
-            # plt.show()
-
-            u0_interp = RegularGridInterpolator(
-                (g_vals, c_vals), u0_grid, method="linear", bounds_error=True
-            )
-
-            self.u0_norm = u0_interp((self.g_mag, nu_eff))
+        if nu_eff is None:
+            self.u0_norm = None
 
         else:
-            self.u0_norm = None
+            self.u0_norm = self._interpolate_u0(self.g_mag, nu_eff)
 
         n_param = 5
 
@@ -950,7 +984,10 @@ class EpochAstrometry(ExoGaia):
                     )
 
         if "astrometric_excess_noise" in gaia_result.columns:
-            if not np.ma.is_masked(gaia_result["astrometric_excess_noise"]):
+            if (
+                not np.ma.is_masked(gaia_result["astrometric_excess_noise"])
+                and gaia_result["astrometric_excess_noise"] != 0.0
+            ):
                 aen = gaia_result["astrometric_excess_noise"]
                 aen_sig = gaia_result["astrometric_excess_noise_sig"]
 
@@ -974,6 +1011,273 @@ class EpochAstrometry(ExoGaia):
         }
 
         return model_param
+
+    @beartype
+    def retrieve_dr4_prelease(
+        self,
+        source_id: typing.Union[int, np.int64],
+        exclude_outliers: bool = True,
+        combine_ccds: bool = False,
+    ) -> None:
+        """
+        Method for retrieving the epoch astrometry for the selected
+        Gaia source. This will only be possible for the future DR4
+        and DR5 data releases. Important: when setting,
+        ``gaia_release='DR3'``, the DR4 epoch astrometry will be
+        cropped to ``time_end`` of DR3. This is useful for testing
+        purposes, for example to calculate the RUWE and orbit
+        parameters for comparison with the actual DR3 RUWE and
+        NSS orbit parameters.
+
+        Parameters
+        ----------
+        source_id : int
+            Gaia DR4 source ID. Should be any of the sources that are
+            part of the `pre-release <https://www.cosmos.esa.int/web/
+            gaia/dr4-prerelease>`_ list.
+        exclude_outliers : bool
+            Exclude astrometry points that are flagged in the table
+            as outlier (default: True). To be implemented.
+        combine_ccds : bool
+            Combine/average the measurements of the 9 CCDs per
+            transit ID (default: False). The weighted combination
+            of the positions and uncertainties is calculated,
+            assuming uncorrelated uncertainties between CCDs.
+            To be implemented.
+
+        Returns
+        -------
+        NoneType
+            None
+        """
+
+        if self.gaia_release not in ["DR3", "DR4"]:
+            raise ValueError(
+                "Please set 'gaia_release' to 'DR3' or "
+                "'DR4' when using the DR4 pre-release "
+                "epoch astrometry data."
+            )
+
+        if self.gaia_release == "DR3":
+            warnings.warn(
+                "By setting 'gaia_release' to 'DR3', the DR4 "
+                "epoch astrometry will be cropped to an end "
+                "date of {self.time_end}."
+            )
+
+        self.source_id = source_id
+
+        self.query_source(self.source_id, gaia_release="DR3")
+
+        if self.verbose:
+            self.print_section("Retrieving epoch astrometry")
+
+        data_folder = Path.home() / ".exogaia"
+
+        if self.verbose:
+            print(f"Gaia release: {self.gaia_release}")
+            print(f"Reference epoch: {self.ref_epoch}")
+            print(f"Source ID: {self.source_id}")
+
+            print(
+                f"\nPrimary mass (Msun): {self.primary_mass[0]:.2f} "
+                f"+/- {self.primary_mass[1]:.2f}"
+            )
+
+        if not data_folder.exists():
+            if self.verbose:
+                print(f"Creating folder: {str(data_folder)}")
+
+            data_folder.mkdir(parents=True, exist_ok=False)
+
+        file_name = "GAIA_DR4_PRERELEASE_EPOCH_ASTROMETRY_RAW.xml"
+        data_file = data_folder / file_name
+        url = (
+            "https://home.strw.leidenuniv.nl/~stolker/exogaia/"
+            "GAIA_DR4_PRERELEASE_EPOCH_ASTROMETRY_RAW.xml"
+        )
+
+        if not data_file.exists():
+            if self.verbose:
+                print()
+
+            pooch.retrieve(
+                url=url,
+                known_hash="f81f4dc11064b72d99f536e3d34365694b839629b424d8247a4b5501016f3ce3",
+                fname=file_name,
+                path=data_folder,
+                progressbar=True,
+            )
+
+        table = Table.read(data_file, format="votable")
+        df_full = table.to_pandas()
+
+        if self.verbose:
+            print(f"\nData file: {data_file}")
+            print(f"Data shape: {df_full.shape}")
+
+            print(f"\nSource IDs:\n{list(df_full['source_id'].unique())}")
+            print(f"\nData columns:\n{list(df_full.columns)}")
+
+        # Extract data of selected source_id
+        # Should be part of https://www.cosmos.esa.int/web/gaia/dr4-prerelease
+
+        self.data_table = df_full[df_full["source_id"] == self.source_id]
+
+        # Remove column 'centroid_pos_ac' or any column with all rows set to NaN
+
+        self.data_table.dropna(axis="columns", how="all", inplace=True)
+
+        # Explode the columns that contains lists
+        # This transforms list-like values in a column into multiple rows, while
+        # duplicating the values in the other columns that contain single values
+
+        cols_explode = [
+            "obs_time_tcb",
+            "scan_pos_angle",
+            "colour_factor_al",
+            "colour_factor_ac",
+            "centroid_pos_al",
+            "centroid_pos_error_al",
+            "calculated_pos_ac",
+            "used_by_agis_al",
+            "used_by_agis_ac",
+            "ccd_proc_flags",
+            "ipd_error_al",
+            "ipd_error_ac",
+            "gates",
+            "source_dist_to_last_ci",
+            "sub_pixel_coord",
+            "mu",
+        ]
+
+        self.data_table = self.data_table.explode(cols_explode).reset_index(drop=True)
+
+        # Exclude outliers based on ccd_proc_flags
+
+        if exclude_outliers:
+            self.data_table = self.data_table[
+                self.data_table["ccd_proc_flags"] == 0
+            ].reset_index(drop=True)
+
+        # Sort data chronologically
+
+        self.data_table.sort_values("obs_time_tcb", inplace=True, ignore_index=True)
+
+        if self.data_table["nu_eff_used_in_astrometry"].nunique() != 1:
+            raise ValueError(
+                "There should be only one unique value of "
+                "nu_eff_used_in_astrometry for each source."
+            )
+
+        # Gaia (E)DR3: Re-normalised Unit Weight Error (RUWE)
+        # tables of u0(g,c) by L. Lindegren (2023 Sep 13)
+        # https://www.cosmos.esa.int/web/gaia/dr3-auxiliary-data
+
+        nu_eff = self.data_table["nu_eff_used_in_astrometry"].unique()[0]
+        self.u0_norm = self._interpolate_u0(self.g_mag, nu_eff)
+
+        # Select relevant columns needed for exogaia
+
+        cols_select = [
+            "transit_id",
+            "obs_time_tcb",
+            "scan_pos_angle",
+            "centroid_pos_al",
+            "centroid_pos_error_al",
+            "parallax_factor_al",
+        ]
+
+        self.data_table = self.data_table[cols_select]
+
+        # Find rows containing masked values and remove those rows
+
+        mask = self.data_table.apply(lambda col: col.map(np.ma.is_masked)).any(axis=1)
+        self.data_table = self.data_table.loc[~mask].reset_index(drop=True)
+
+        # Convert selected columns from object dtype to numeric
+
+        cols_convert = ["scan_pos_angle", "centroid_pos_al", "centroid_pos_error_al"]
+
+        for item in cols_convert:
+            self.data_table[item] = pd.to_numeric(
+                self.data_table[item], errors="coerce"
+            )
+
+        # Combine CCDs per transit
+
+        if combine_ccds:
+            cols_to_keep = list(self.data_table.columns)
+
+            # Select the central row/CCD for each transit
+            agg_dict = {col: lambda x: x.iloc[len(x) // 2] for col in cols_to_keep}
+
+            def weighted_mean(al_pos, al_err):
+                weight = 1.0 / al_err**2
+                return np.sum(weight * al_pos) / np.sum(weight)
+
+            def weighted_error(al_err):
+                return 1.0 / np.sqrt(np.sum(1.0 / al_err**2))
+
+            agg_dict["centroid_pos_al"] = lambda x: weighted_mean(
+                x.values, self.data_table.loc[x.index, "centroid_pos_error_al"].values
+            )
+
+            agg_dict["centroid_pos_error_al"] = weighted_error
+
+            df_transit = (
+                self.data_table[cols_to_keep]
+                .groupby("transit_id", sort=False)
+                .agg(agg_dict)
+                .reset_index(drop=True)
+            )
+
+            self.data_table = df_transit
+
+        # Convert scan angles from degrees to radians
+        # Store the sin and cos since only these are needed
+
+        scan_ang = np.radians(self.data_table["scan_pos_angle"].astype(float))
+        self.data_table["sin_scan_ang"] = np.sin(scan_ang)
+        self.data_table["cos_scan_ang"] = np.cos(scan_ang)
+
+        # obs_time_tcb : effective observing time as TCB (Long[10] array, Time[ns])
+        # Effective observation time for each CCD in this FoV transit.
+        # Centre of the actual exposure timefor the given window/CCD, depending on
+        # readout time and gate. In units of nanoseconds sinceJ2010.0(TCB). The
+        # presentation as long integer (rather than as double float) is chosen for
+        # the sake of keepingthe full resolution of the time coordinates used in
+        # Gaia/DPAC, and for the sake of invertability oftransformations from OBMT
+        # to TCB and vice versa.Such transformations are done using HATT
+        # (High-Accuracy Time Transformations), which havethe resolution of
+        # 1 nanosecond. But users should be aware that the absolute accuracy of
+        # them isin the order of 150 nanoseconds
+
+        # Store obs_time_tcb in Julian years
+
+        obs_time = (
+            Time("J2010.0", scale="tcb")
+            + self.data_table["obs_time_tcb"].astype(np.int64).to_numpy() * u.ns
+        )
+
+        self.data_table["obs_time_tcb"] = obs_time.tcb.jyear
+
+        # Exclude observations after the requested end time of DR3
+
+        if self.gaia_release == "DR3":
+            self.data_table = self.data_table[
+                self.data_table["obs_time_tcb"] <= self.time_end.tcb.jyear
+            ].reset_index(drop=True)
+
+        # Store times as Julian years and days relative to ref_epoch
+
+        self.data_table["relative_time_year"] = (
+            self.data_table["obs_time_tcb"] - self.ref_epoch.tcb.jyear
+        )
+
+        self.data_table["relative_time_day"] = self.data_table[
+            "relative_time_year"
+        ] * u.year.to(u.day)
 
     @beartype
     def retrieve_data(
@@ -1069,17 +1373,18 @@ class EpochAstrometry(ExoGaia):
                 pass
 
     @beartype
-    def gaia_bh3(
+    def retrieve_gaia_bh3(
         self,
         exclude_outliers: bool = True,
         combine_ccds: bool = False,
     ) -> None:
         """
-        Method for storing the Gaia DR3 epoch astrometry of
+        Method for storing the Gaia DR4 epoch astrometry of
         the black hole Gaia BH3 in the ``data_table``. The
         data file can be found `here <https://github.com/
         tomasstolker/exogaia/blob/main/data/
-        gaiabh3_epochast.dat>`_.
+        gaiabh3_epochast.dat>`_, which is from
+        `here <https://github.com/esa/gaia-bhthree>`_.
 
         Parameters
         ----------
@@ -1100,6 +1405,12 @@ class EpochAstrometry(ExoGaia):
 
         self.source_id = 4318465066420528000
 
+        if self.gaia_release != "DR4":
+            raise ValueError(
+                "Please set 'gaia_release' to 'DR4' when using "
+                "the DR4 epoch astrometry data of Gaia BH3."
+            )
+
         _ = self.query_source(source_id=self.source_id, gaia_release="DR3")
 
         if self.verbose:
@@ -1107,10 +1418,6 @@ class EpochAstrometry(ExoGaia):
 
         file_folder = Path(__file__).resolve().parent.parent
         data_file = file_folder / "data/gaiabh3_epochast.dat"
-
-        if self.gaia_release == "DR3":
-            self.ref_epoch = Time("2016.0", format="jyear", scale="tcb")
-            self.time_end = Time("2017-05-28 08:44:00", scale="utc")
 
         if self.verbose:
             print(f"Gaia release: {self.gaia_release}")
@@ -1184,15 +1491,13 @@ class EpochAstrometry(ExoGaia):
             self.data_table["obs_time_tcb"], format="jd", scale="tcb"
         ).tcb.jyear
 
-        if "relative_time_year" not in self.data_table:
-            self.data_table["relative_time_year"] = (
-                self.data_table["obs_time_tcb"] - self.ref_epoch.tcb.jyear
-            )
+        self.data_table["relative_time_year"] = (
+            self.data_table["obs_time_tcb"] - self.ref_epoch.tcb.jyear
+        )
 
-        if "relative_time_day" not in self.data_table:
-            self.data_table["relative_time_day"] = self.data_table[
-                "relative_time_year"
-            ] * u.year.to(u.day)
+        self.data_table["relative_time_day"] = self.data_table[
+            "relative_time_year"
+        ] * u.year.to(u.day)
 
         if self.verbose:
             print(f"\nData file: {data_file}")

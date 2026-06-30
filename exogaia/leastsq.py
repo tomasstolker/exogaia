@@ -1914,11 +1914,11 @@ class LeastSquares(ExoGaia):
 
         lower = np.array(
             [
-                -100.0,  # (mas)
-                -100.0,  # (mas)
+                -1000.0,  # (mas)
+                -1000.0,  # (mas)
                 0.0,  # (mas)
-                -2000.0,  # (mas/yr)
-                -2000.0,  # (mas/yr)
+                -10000.0,  # (mas/yr)
+                -10000.0,  # (mas/yr)
                 10.0,  # (days)
                 0.0,
                 0.0,
@@ -1931,11 +1931,11 @@ class LeastSquares(ExoGaia):
 
         upper = np.array(
             [
-                100.0,  # (mas)
-                100.0,  # (mas)
                 1000.0,  # (mas)
-                2000.0,  # (mas/yr)
-                2000.0,  # (mas/yr)
+                1000.0,  # (mas)
+                1000.0,  # (mas)
+                10000.0,  # (mas/yr)
+                10000.0,  # (mas/yr)
                 1e5,  # (days)
                 0.99999,
                 1.0,
