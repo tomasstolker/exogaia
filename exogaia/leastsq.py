@@ -1890,7 +1890,7 @@ class LeastSquares(ExoGaia):
         """
 
         if self.best_param is None or len(self.best_param) != 12:
-            self.orbit_grid(plot_file=None, n_points=30)
+            self.orbit_grid(n_points=30, plot_file=None)
 
         if verbose:
             self.print_section("Orbit fit (12 parameters)")
@@ -2023,7 +2023,9 @@ class LeastSquares(ExoGaia):
         if result.success:
             self.best_param = result.x
 
-            self.param_cov = np.linalg.inv(result.jac.T @ result.jac)
+            # Covariance from the Moore–Penrose pseudoinverse of J^T J.
+            # More numerically stable than np.linalg.inv(jac.T @ jac)
+            self.param_cov = np.linalg.pinv(result.jac.T @ result.jac)
             param_sig = np.sqrt(np.diag(self.param_cov))
 
             # Calculate companion mass (Msun)
@@ -2493,7 +2495,9 @@ class LeastSquares(ExoGaia):
                 plt.savefig(plot_file)
 
         else:
-            warnings.warn(f"The fit was not successful: {result.message}")
             fig = None
+
+            if verbose:
+                warnings.warn(f"The fit was not successful: {result.message}")
 
         return fig

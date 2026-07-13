@@ -1340,9 +1340,6 @@ class EpochAstrometry(ExoGaia):
             print(f"\nData file: {data_file}")
             print(f"Data shape: {df_full.shape}")
 
-            # print(f"\nSource IDs:\n{list(df_full['source_id'].unique())}")
-            # print(f"\nData columns:\n{list(df_full.columns)}")
-
         # Extract data of selected source_id
         # Should be part of https://www.cosmos.esa.int/web/gaia/dr4-prerelease
 
@@ -1377,6 +1374,19 @@ class EpochAstrometry(ExoGaia):
 
         self.data_table = self.data_table.explode(cols_explode).reset_index(drop=True)
 
+        # Total number of rows for selected source
+
+        n_total = self.data_table.shape[0]
+
+        # Find rows containing masked values and remove those rows
+
+        mask = self.data_table.apply(lambda col: col.map(np.ma.is_masked)).any(axis=1)
+        self.data_table = self.data_table.loc[~mask].reset_index(drop=True)
+
+        # Convert object dtype to the actual dtype
+
+        self.data_table = self.data_table.infer_objects(copy=False).convert_dtypes()
+
         # Exclude outliers based on ccd_proc_flags
 
         if exclude_outliers:
@@ -1385,6 +1395,15 @@ class EpochAstrometry(ExoGaia):
             # ].reset_index(drop=True)
 
             self.data_table = self.data_table[self.data_table["used_by_agis_al"]]
+
+        # Remaining number of rows after removing rows with a masked value
+        # and optionally removing outliers based on used_by_agis_al
+
+        n_selected = self.data_table.shape[0]
+
+        print("\nNumber of rows for selected source:")
+        print(f"   - Total = {n_total}")
+        print(f"   - Selected = {n_selected}")
 
         # Sort data chronologically
 
@@ -1415,11 +1434,6 @@ class EpochAstrometry(ExoGaia):
         # ]
         #
         # self.data_table = self.data_table[cols_select]
-
-        # Find rows containing masked values and remove those rows
-
-        mask = self.data_table.apply(lambda col: col.map(np.ma.is_masked)).any(axis=1)
-        self.data_table = self.data_table.loc[~mask].reset_index(drop=True)
 
         # Convert selected columns from object dtype to numeric
 

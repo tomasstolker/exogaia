@@ -7,8 +7,6 @@ from numbers import Real
 import matplotlib.pyplot as plt
 import numpy as np
 
-from astropy import units as u
-
 from beartype import beartype, typing
 from matplotlib.figure import Figure
 from scipy.ndimage import gaussian_filter
@@ -61,6 +59,8 @@ class CompletenessMap(ExoGaia):
             verbose=False,
         )
 
+        self.print_section("Completeness map")
+
         print(f"Gaia ID = {self.source_id}")
         print(f"Gaia release = {self.gaia_release}")
         print(
@@ -72,7 +72,8 @@ class CompletenessMap(ExoGaia):
     @beartype
     def calc_completeness(
         self,
-        n_sigma: Real = 5,
+        det_type: str = "accel_7param",
+        n_sigma: Real = 3.0,
         n_samples: int = 30,
         mass_points: typing.Optional[np.ndarray] = None,
         sma_points: typing.Optional[np.ndarray] = None,
@@ -80,16 +81,23 @@ class CompletenessMap(ExoGaia):
         plot_file: typing.Optional[str] = None,
     ) -> Figure:
         """
-        Compute and plot a completeness map for astrometric
-        accelerations. This method estimates the detection
-        completeness by sampling random orbits for a grid of
-        companion masses and semi-major axes. A 9-parameter
-        acceleration model is fit, and the fraction of
+        Compute and plot a completeness map. This method
+        estimates the detection completeness by sampling
+        random orbits for a grid of companion masses and
+        semi-major axes. Either a 7-parameter
+        acceleration, 9-parameter acceleration, or full
+        orbit model is fit, and the fraction of
         realizations with a detection significance larger
-        than ``n_sigma`` adopted as completeness.
+        than ``n_sigma`` is adopted as the completeness.
 
         Parameters
         ----------
+        det_type : str
+            Detection type: 'accel_7param', 'accel_9param',
+            or 'orbit', for respectively using the precision
+            on the acceleration, jerk, and orbital period, to
+            determine if a simulated source is detected
+            with a significance of ``n_sigma``.
         n_sigma : float, optional
             Detection threshold in units of acceleration
             signal-to-noise (default: 5.0).
@@ -131,7 +139,7 @@ class CompletenessMap(ExoGaia):
           of companion mass (Msun) and semi-major axis (au).
         """
 
-        self.print_section("Completeness map")
+        self.print_section("Calculate completeness")
 
         if mass_points is None:
             # Grid points for companion mass (Msun)
@@ -157,31 +165,71 @@ class CompletenessMap(ExoGaia):
 
                     least_sq = LeastSquares(epoch_astrometry=self.epoch_astrom)
 
-                    least_sq.accel_9param(plot_file=None, verbose=False)
+                    if det_type == "accel_7param":
+                        least_sq.accel_7param(plot_file=None, verbose=False)
 
-                    # Acceleration dmu/dt (mas/yr^2)
-                    # Quadratic sum of the RA and Dec components
-                    accel = np.sqrt(
-                        least_sq.best_param[5] ** 2 + least_sq.best_param[6] ** 2
-                    )
+                        # Acceleration dmu/dt (mas/yr^2)
+                        accel_components = least_sq.best_param[5:7]
+                        accel = np.linalg.norm(accel_components)
 
-                    # Gradient with respect to the RA and Dec components
-                    # So delta(a)/delta(a_RA) and delta(a)/delta(a_Dec)
-                    # with a = sqrt(a_RA^2 + a_Dec^2)
-                    grad_accel = np.array(
-                        [least_sq.best_param[5] / accel, least_sq.best_param[6] / accel]
-                    )
+                        # Gradient of |a| with respect to the RA and Dec components
+                        grad_accel = accel_components / accel
 
-                    # Covariance matrix for acceleration in RA and Dec
-                    cov_accel = least_sq.param_cov[5:7, 5:7]
+                        # Covariance matrix of the RA and Dec acceleration components
+                        cov_accel = least_sq.param_cov[5:7, 5:7]
 
-                    # Propagate RA and Dec acceleration uncertainty into
-                    # uncertainty on total acceleration, while folding in
-                    # the covariances between the RA and Dec acceleration
-                    sigma_accel = np.sqrt(grad_accel @ cov_accel @ grad_accel)
+                        # Uncertainty on the total acceleration
+                        sigma_accel = np.sqrt(grad_accel @ cov_accel @ grad_accel)
 
-                    if accel / sigma_accel > n_sigma:
-                        compl_map[mass2_idx, sma_idx] += 1.0 / float(n_samples)
+                        if accel / sigma_accel > n_sigma:
+                            compl_map[mass2_idx, sma_idx] += 1.0 / float(n_samples)
+
+                    elif det_type == "accel_9param":
+                        least_sq.accel_9param(plot_file=None, verbose=False)
+
+                        # Jerk d²mu/dt² (mas/yr^3)
+                        # Parameters 7 and 8 are the RA and Dec jerk components.
+                        jerk_components = least_sq.best_param[7:9]
+                        jerk = np.linalg.norm(jerk_components)
+
+                        # Gradient of |j| with respect to the RA and Dec components
+                        grad_jerk = jerk_components / jerk
+
+                        # Covariance matrix of the RA and Dec jerk components
+                        cov_jerk = least_sq.param_cov[7:9, 7:9]
+
+                        # Propagate the component uncertainties and covariance into the
+                        # uncertainty on the total jerk.
+                        sigma_jerk = np.sqrt(grad_jerk @ cov_jerk @ grad_jerk)
+
+                        if sigma_jerk > 0.0 and jerk / sigma_jerk > n_sigma:
+                            compl_map[mass2_idx, sma_idx] += 1.0 / float(n_samples)
+
+                    elif det_type == "orbit":
+                        least_sq.orbit_grid(
+                            n_points=20,
+                            map_type="chi2_det",
+                            plot_file=None,
+                            verbose=False,
+                        )
+
+                        least_sq.orbit_fit(
+                            inc_jitter=False, plot_file=None, verbose=False
+                        )
+
+                        if least_sq.fit_success:
+                            period = least_sq.best_param[9]
+                            sigma_period = np.sqrt(np.diag(least_sq.param_cov))[9]
+
+                            if period / sigma_period > n_sigma:
+                                compl_map[mass2_idx, sma_idx] += 1.0 / float(n_samples)
+
+                    else:
+                        raise ValueError(
+                            f"Setting 'det_type'='{det_type}' is not valid. "
+                            "Please set the argument of 'det_type' to "
+                            "'accel_7param', 'accel_9param', or 'orbit'."
+                        )
 
                 pbar.update(1)
 
@@ -201,11 +249,12 @@ class CompletenessMap(ExoGaia):
         ax.set_xlabel("Semi-major axis (au)", fontsize=12)
         ax.set_ylabel(r"Companion mass ($M_\odot$)", fontsize=12)
         ax.set_xscale("log")
-        ax.set_title(rf"${n_sigma}\sigma$ acceleration completeness", fontsize=10.0)
+        ax.set_title(rf"${n_sigma}\sigma$ completeness ({det_type})", fontsize=10.0)
 
         if plot_file is None:
             plt.show()
         else:
             plt.savefig(plot_file)
+            plt.close(fig)
 
         return fig

@@ -445,7 +445,7 @@ class KeplerModel(ExoGaia):
         # rel_time_day: observation times in days relative to ref_epoch
         # delta_t: observation times relative to time of periastron
         delta_t = rel_time_day - t_per
-        
+
         # Mean anomaly at observation epochs
         mean_anom_obs = delta_t * 2.0 * np.pi / per
 
