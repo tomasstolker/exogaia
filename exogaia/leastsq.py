@@ -22,18 +22,17 @@ from tqdm.auto import tqdm
 # from matplotlib import cm
 # from matplotlib.colors import Normalize
 
-from exogaia.core import ExoGaia
 from exogaia.data import EpochAstrometry
-from exogaia.models import KeplerModel, StarModel
 from exogaia.utils import (
     calc_sma_from_ti,
     calc_mass_from_sma,
     param_list_to_dict,
+    print_section,
     thiele_innes_to_campbell,
 )
 
 
-class LeastSquares(ExoGaia):
+class LeastSquares:
     """
     Class for least-squares model fit of epoch astrometry. The best-fit
     parameters and astrometric model, and the corresponding
@@ -202,7 +201,7 @@ class LeastSquares(ExoGaia):
         """
 
         if verbose:
-            self.print_section("Astrometric excess noise")
+            print_section("Astrometric excess noise")
 
         obs_pos = self.data_table["centroid_pos_al"].to_numpy()
         obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
@@ -489,7 +488,7 @@ class LeastSquares(ExoGaia):
         """
 
         if verbose:
-            self.print_section("Single star (5 parameters)")
+            print_section("Single star (5 parameters)")
 
         # Epoch astrometry data
         obs_time = self.data_table["obs_time_tcb"].to_numpy()
@@ -544,6 +543,8 @@ class LeastSquares(ExoGaia):
         fig = None
 
         if plot_file is not None:
+            from exogaia.models import StarModel
+
             model_param = param_list_to_dict(self.best_param)
 
             star_model = StarModel(
@@ -718,7 +719,7 @@ class LeastSquares(ExoGaia):
         """
 
         if verbose:
-            self.print_section("Binary star (7 parameters)")
+            print_section("Binary star (7 parameters)")
 
         # Epoch astrometry data
         obs_time = self.data_table["obs_time_tcb"].to_numpy()
@@ -782,6 +783,8 @@ class LeastSquares(ExoGaia):
         fig = None
 
         if plot_file is not None:
+            from exogaia.models import StarModel
+
             # Stellar track
 
             model_param = param_list_to_dict(self.best_param)
@@ -1083,7 +1086,7 @@ class LeastSquares(ExoGaia):
         """
 
         if verbose:
-            self.print_section("Binary star (9 parameters)")
+            print_section("Binary star (9 parameters)")
 
         # Epoch astrometry data
 
@@ -1157,6 +1160,8 @@ class LeastSquares(ExoGaia):
         fig = None
 
         if plot_file is not None:
+            from exogaia.models import StarModel
+
             # Stellar track
 
             model_param = param_list_to_dict(self.best_param)
@@ -1488,7 +1493,7 @@ class LeastSquares(ExoGaia):
         """
 
         if verbose:
-            self.print_section("Orbit grid (12-parameters)")
+            print_section("Orbit grid (12-parameters)")
 
         if map_type not in ["ruwe", "chi2_det", "chi2_param"]:
             raise ValueError(
@@ -1517,6 +1522,8 @@ class LeastSquares(ExoGaia):
 
         # Grid for the relative time of periastron
         tau_list = np.linspace(1e-6, 1.0 - 1e-6, n_points, endpoint=False)
+
+        from exogaia.models import KeplerModel
 
         kepler_model = KeplerModel(
             epoch_astrometry=self.epoch_astrometry, verbose=False
@@ -1893,7 +1900,7 @@ class LeastSquares(ExoGaia):
             self.orbit_grid(n_points=30, plot_file=None)
 
         if verbose:
-            self.print_section("Orbit fit (12 parameters)")
+            print_section("Orbit fit (12 parameters)")
 
         # Epoch astrometry data
         obs_time = self.data_table["obs_time_tcb"].to_numpy()
@@ -1953,9 +1960,7 @@ class LeastSquares(ExoGaia):
 
         bounds = (lower, upper)
 
-        # Normalize the variances to make sure that the
-        # np.log of the normalization term is positive
-        var_norm = np.median(obs_err**2)
+        from exogaia.models import KeplerModel
 
         @beartype
         def like_residuals(params: np.ndarray, obs_err: np.ndarray) -> np.ndarray:
@@ -1993,26 +1998,35 @@ class LeastSquares(ExoGaia):
 
             model_param = param_list_to_dict(param_list)
 
-            # We construct residuals such that least_squares minimizes
-            # the full Gaussian negative log-likelihood:
-            #
-            #   -ln L = 0.5 * sum[ r_i^2 / var_i + ln(var_i) ]
-            #
-            # The factor of 0.5 is applied internally by
-            # scipy.optimize.least_squares, so it must not appear
-            # explicitly in the residuals. Likewise, there is no
-            # leading minus sign because least_squares performs
-            # a minimization of the summed squared residuals.
-            #
-            # The signed square root is used so that negative
-            # log-variance terms are represented with real residuals
-            # while preserving the correct summed-square value.
-            like_res = kepler_model.calc_residuals(model_param) / np.sqrt(var)
+            residual = kepler_model.calc_residuals(model_param)
+            data_term = residual / np.sqrt(var)
 
-            log_var = np.log(var / var_norm)
-            like_norm = np.sign(log_var) * np.sqrt(np.abs(log_var))
+            # The Gaussian log-likelihood contains the normalization term
+            #
+            #     log(var),
+            #
+            # but least_squares can only minimize a sum of squared residuals.
+            # Therefore, the argument of sqrt() must be non-negative.
+            #
+            # Since
+            #
+            #     var = obs_err**2 + jitter**2 >= obs_err**2,
+            #
+            # we instead use
+            #
+            #     log(var / obs_err**2)
+            #       = log(var) - log(obs_err**2),
+            #
+            # which is always >= 0 because var / obs_err**2 >= 1.
+            #
+            # The second term depends only on the fixed observational
+            # uncertainties and is therefore a parameter-independent constant.
+            # Adding or subtracting such a constant does not change the location
+            # of the likelihood maximum, so this formulation is mathematically
+            # equivalent for optimization while ensuring real-valued residuals.
+            var_term = np.sqrt(np.log(var / obs_err**2))
 
-            return np.hstack([like_res, like_norm])
+            return np.concatenate((data_term, var_term))
 
         result = least_squares(
             like_residuals, fit_param, args=(obs_err,), bounds=bounds
@@ -2027,6 +2041,25 @@ class LeastSquares(ExoGaia):
             # More numerically stable than np.linalg.inv(jac.T @ jac)
             self.param_cov = np.linalg.pinv(result.jac.T @ result.jac)
             param_sig = np.sqrt(np.diag(self.param_cov))
+
+            if inc_jitter:
+                fit_param = self.best_param[:-1]
+                fit_var = obs_err**2 + self.best_param[-1] ** 2
+            else:
+                fit_param = self.best_param
+                fit_var = obs_err**2
+
+            fit_model_param = param_list_to_dict(fit_param)
+
+            fit_model = KeplerModel(
+                epoch_astrometry=self.epoch_astrometry, verbose=False
+            )
+
+            fit_residuals = fit_model.calc_residuals(fit_model_param)
+
+            self.chi2 = np.sum(fit_residuals**2 / fit_var)
+            self.n_dof = fit_residuals.size - self.best_param.size
+            self.chi2_red = self.chi2 / self.n_dof
 
             # Calculate companion mass (Msun)
 
@@ -2043,15 +2076,6 @@ class LeastSquares(ExoGaia):
             sma = (
                 (self.best_param[5] / 365.25) ** 2 * (self.primary_mass[0] + mass_2)
             ) ** (1.0 / 3.0)
-
-            # Degrees of freedom = n_data - n_param
-            dof = result.jac.shape[0] - result.jac.shape[1]
-
-            # See SciPy docs for definition of the cost function
-            # https://docs.scipy.org/doc/scipy/reference/
-            # generated/scipy.optimize.least_squares.html
-            self.chi2 = 2.0 * result.cost
-            self.chi2_red = self.chi2 / dof
 
             if self.epoch_astrometry.sim_data:
                 self.ruwe = np.sqrt(self.chi2_red)
@@ -2156,6 +2180,7 @@ class LeastSquares(ExoGaia):
             if inc_jitter:
                 # Remove the jitter parameter
                 self.best_param = self.best_param[:-1]
+                self.param_cov = self.param_cov[:-1, :-1]
 
             fig = None
 
@@ -2370,7 +2395,7 @@ class LeastSquares(ExoGaia):
                 # Position at time of periastron (in Julian years)
 
                 t_per = (
-                    self.ref_epoch.value
+                    self.ref_epoch.tcb.jyear
                     + (self.best_param[5] * self.best_param[7]) / 365.25
                 )
 

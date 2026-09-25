@@ -4,6 +4,7 @@ Module for Gaia epoch astrometry data.
 
 import warnings
 
+from abc import ABC, abstractmethod
 from numbers import Real
 from pathlib import Path
 
@@ -13,23 +14,94 @@ import numpy as np
 import pandas as pd
 import pooch
 
+from astropy import constants as c
 from astropy import units as u
 from astropy.table import Table
 from astropy.time import Time
 from astroquery.gaia import Gaia
+from astroquery.simbad import Simbad
 from beartype import beartype, typing
 from imf.imf import make_cluster
 from scipy.interpolate import RegularGridInterpolator
 
-from exogaia.core import ExoGaia
 from exogaia.models import KeplerModel, StarModel
 from exogaia.planets import OccurrenceRate
-from exogaia.utils import binary_bias
+from exogaia.utils import binary_bias, print_section, read_hipparcos_header
 
 Gaia.ROW_LIMIT = -1
 
 
-class EpochAstrometry(ExoGaia):
+class EpochAstrometry(ABC):
+    """
+    Abstract base class for epoch astrometry datasets.
+    """
+
+    @beartype
+    def __init__(
+        self,
+        primary_mass: typing.Optional[typing.Tuple[Real, Real]] = None,
+        verbose: bool = True,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        primary_mass : tuple(float, float), None
+            Stellar mass and uncertainty (M$_\\odot$), provided as
+            ``(mass, mass_error)``.
+        verbose : bool
+            Print information.
+
+        Returns
+        -------
+        NoneType
+            None.
+        """
+
+        self.primary_mass = primary_mass
+        self.verbose = verbose
+
+        self.data_table: typing.Optional[pd.DataFrame] = None
+        self.ref_epoch: typing.Optional[Time] = None
+        self.time_start: typing.Optional[Time] = None
+        self.time_end: typing.Optional[Time] = None
+        self.sim_data: bool = False
+        self.u0_norm: typing.Optional[float] = None
+
+        self.ra_ref: typing.Optional[Time] = None
+        self.dec_ref: typing.Optional[Time] = None
+        self.parallax: typing.Optional[Time] = None
+        self.pm_ra: typing.Optional[Time] = None
+        self.pm_dec: typing.Optional[Time] = None
+
+    def __repr__(self) -> str:
+        """
+        Return a string representation of the stored data table.
+
+        Returns
+        -------
+        str
+            First rows of the data table if available, otherwise a
+            message indicating that no data are loaded.
+        """
+
+        if self.data_table is None:
+            return "Data table is empty"
+
+        return self.data_table.head().to_string()
+
+    @abstractmethod
+    def retrieve_data(self, *args, **kwargs) -> dict:
+        """
+        Retrieve and store epoch astrometry.
+
+        Returns
+        -------
+        dict
+            Reference astrometric parameters.
+        """
+
+
+class GaiaAstrometry(EpochAstrometry):
     """
     Class for reading, querying, and simulating Gaia
     epoch astrometry data.
@@ -39,7 +111,7 @@ class EpochAstrometry(ExoGaia):
     def __init__(
         self,
         primary_mass: typing.Optional[typing.Tuple[Real, Real]] = None,
-        gaia_release: str = "DR4",
+        gaia_release: typing.Literal["DR1", "DR2", "DR3", "DR4", "DR5"] = "DR4",
         verbose: bool = True,
     ) -> None:
         """
@@ -65,33 +137,46 @@ class EpochAstrometry(ExoGaia):
             None
         """
 
+        super().__init__(primary_mass, verbose)
+
         self.verbose = verbose
 
         if self.verbose:
-            self.print_section("Epoch astrometry")
+            print_section("Gaia astrometry", bound_char="=")
+
+        self.data_folder = Path.home() / ".exogaia"
+
+        if not self.data_folder.exists():
+            if self.verbose:
+                print(f"Creating folder: {str(self.data_folder)}")
+
+            self.data_folder.mkdir(parents=True, exist_ok=False)
 
         self.gaia_release = gaia_release
-        self.primary_mass = primary_mass
-        self.data_table = None
-
         self.source_id = None
-        self.ra = None
-        self.dec = None
-        self.parallax = None
-        self.pm_ra = None
-        self.pm_dec = None
         self.g_mag = None
-        self.u0_norm = None
-        self.sim_data = False
 
         # Start of the Gaia mission
         self.time_start = Time("2014-07-25 10:30:00", scale="utc")
 
-        if self.gaia_release == "DR3":
+        if self.gaia_release == "DR1":
+            # https://esdcdoi.esac.esa.int/doi/html/data/astronomy/gaia/DR1.html
+            # Only the end day and not the end time is known?
+            self.ref_epoch = Time("2015.0", format="jyear", scale="tcb")
+            self.time_end = Time("2015-09-16 00:00:00", scale="utc")
+
+        elif self.gaia_release == "DR2":
+            # https://www.cosmos.esa.int/web/gaia/dr2
+            self.ref_epoch = Time("2015.5", format="jyear", scale="tcb")
+            self.time_end = Time("2016-05-23 11:35:00", scale="utc")
+
+        elif self.gaia_release == "DR3":
+            # https://www.cosmos.esa.int/web/gaia/dr3
             self.ref_epoch = Time("2016.0", format="jyear", scale="tcb")
             self.time_end = Time("2017-05-28 08:44:00", scale="utc")
 
         elif self.gaia_release == "DR4":
+            # https://www.cosmos.esa.int/web/gaia/dr4
             self.ref_epoch = Time("2017.5", format="jyear", scale="tcb")
             self.time_end = Time("2020-01-20 22:00:00", scale="utc")
 
@@ -99,32 +184,18 @@ class EpochAstrometry(ExoGaia):
             self.ref_epoch = Time("2020.0", format="jyear", scale="tcb")
             self.time_end = Time("2025-01-15 00:00:00", scale="utc")
 
+        else:
+            raise ValueError("The Gaia release {self.gaia_release} is not supported.")
+
         if self.verbose:
             print(f"Gaia release: {self.gaia_release}")
-            print(f"Reference epoch: {self.ref_epoch}")
+            print(f"Reference epoch: {self.ref_epoch.tcb.jyear_str}")
 
             if primary_mass is not None:
                 print(
                     f"\nPrimary mass (Msun): {primary_mass[0]:.2f} "
                     f"+/- {primary_mass[1]:.2f}"
                 )
-
-    def __repr__(self):
-        """
-        String representation of the data table of the class.
-
-        Returns
-        -------
-        str
-            Header of the data table if available.
-        """
-
-        if self.data_table is None:
-            data_str = "Data table is empty"
-        else:
-            data_str = self.data_table.head().to_string()
-
-        return data_str
 
     @beartype
     def read_file(
@@ -146,7 +217,7 @@ class EpochAstrometry(ExoGaia):
         """
 
         if self.verbose:
-            self.print_section("Read data file")
+            print_section("Read data file")
 
         self.data_table = pd.read_csv(data_file)
 
@@ -160,7 +231,7 @@ class EpochAstrometry(ExoGaia):
             )
 
         if "relative_time_day" not in self.data_table:
-            self.data_table["relative_time_year"] = self.data_table[
+            self.data_table["relative_time_day"] = self.data_table[
                 "relative_time_year"
             ] * u.year.to(u.day)
 
@@ -377,26 +448,26 @@ class EpochAstrometry(ExoGaia):
         # Adopt stellar parameters from class attributes
         # or use the parameters from the model_param dictionary
 
-        if "ra" in model_param:
-            self.ra = model_param["ra"]
-            del model_param["ra"]
+        if "ra_ref" in model_param:
+            self.ra_ref = model_param["ra_ref"]
+            del model_param["ra_ref"]
 
-        elif self.ra is None:
+        elif self.ra_ref is None:
             raise ValueError(
-                "Please either provide the 'ra' in the model_param "
-                "dictionary or run 'query_source()' to adopt the "
-                "values from a Gaia source."
+                "Please either provide the 'ra_ref' in the "
+                "model_param  dictionary or run 'query_source()'  "
+                "to adopt the values from a Gaia source."
             )
 
-        if "dec" in model_param:
-            self.dec = model_param["dec"]
-            del model_param["dec"]
+        if "dec_ref" in model_param:
+            self.dec_ref = model_param["dec_ref"]
+            del model_param["dec_ref"]
 
-        elif self.dec is None:
+        elif self.dec_ref is None:
             raise ValueError(
-                "Please either provide the 'dec' in the model_param "
-                "dictionary or run 'query_source()' to adopt the "
-                "values from a Gaia source."
+                "Please either provide the 'dec_ref' in the "
+                "model_param dictionary or run 'query_source()' "
+                "to adopt the values from a Gaia source."
             )
 
         if "parallax" in model_param:
@@ -466,7 +537,7 @@ class EpochAstrometry(ExoGaia):
             star_masses = star_masses[star_masses > 0.08]
 
             # Select a random star from the sample
-            prim_mass = np.random.choice(star_masses, size=1)
+            prim_mass = rng.choice(star_masses, size=1)
 
             # Set an arbitrary uncertainty of 0.1 Msun
             self.primary_mass = (prim_mass[0], 0.1)  # (Msun)
@@ -534,7 +605,7 @@ class EpochAstrometry(ExoGaia):
                     model_param["tau"] = rng.uniform(0.0, 1.0)
 
         if self.verbose:
-            self.print_section("Simulate data")
+            print_section("Simulate data")
 
             if binary:
                 print("System type: binary")
@@ -554,16 +625,8 @@ class EpochAstrometry(ExoGaia):
         # (i.e. 49152 indices). The data for each index is
         # stored in a separate group of the HDF5 file.
 
-        data_folder = Path.home() / ".exogaia"
-
-        if not data_folder.exists():
-            if self.verbose:
-                print(f"Creating folder: {str(data_folder)}")
-
-            data_folder.mkdir(parents=True, exist_ok=False)
-
         file_name = "healpix_data.hdf5"
-        healpix_file = data_folder / file_name
+        healpix_file = self.data_folder / file_name
         url = "https://home.strw.leidenuniv.nl/~stolker/exogaia/healpix_data.hdf5"
 
         if not healpix_file.exists():
@@ -574,7 +637,7 @@ class EpochAstrometry(ExoGaia):
                 url=url,
                 known_hash="54c786f345b891849f43134c9587b03acb9626d935594c2f62469963981ba798",
                 fname=file_name,
-                path=data_folder,
+                path=self.data_folder,
                 progressbar=True,
             )
 
@@ -584,7 +647,9 @@ class EpochAstrometry(ExoGaia):
         nside = 64
 
         # theta and phi are in degrees when lonlat=True
-        pix_num = healpy.ang2pix(nside=nside, theta=self.ra, phi=self.dec, lonlat=True)
+        pix_num = healpy.ang2pix(
+            nside=nside, theta=self.ra_ref, phi=self.dec_ref, lonlat=True
+        )
 
         with h5py.File(healpix_file, "r") as hdf5_file:
             healpix_table = Table(hdf5_file[f"healpix_{nside}_{pix_num:05d}"])
@@ -630,7 +695,7 @@ class EpochAstrometry(ExoGaia):
             table_select["ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]"],
         )
 
-        t_ast = Time(obs_time_tcb, format="jd", scale="tcb") - self.ref_epoch.tcb
+        t_ast = Time(obs_time_tcb, format="jd", scale="tcb") - self.ref_epoch
         t_ast_day = t_ast.to_value("day")
         t_ast_yr = t_ast.to_value("yr")
 
@@ -792,7 +857,7 @@ class EpochAstrometry(ExoGaia):
         """
 
         if self.verbose:
-            self.print_section("Retrieve Gaia non-single star tables")
+            print_section("Retrieve Gaia non-single star tables")
 
         if gaia_release != "DR3":
             raise ValueError(
@@ -882,11 +947,11 @@ class EpochAstrometry(ExoGaia):
         """
 
         if self.verbose:
-            self.print_section("Querying source")
+            print_section("Querying source")
 
         self.source_id = source_id
 
-        if gaia_release in ["DR4", "DR5"]:
+        if gaia_release != "DR3":
             raise ValueError(
                 "The 'query_source' method supports "
                 "currently only gaia_release='DR3'."
@@ -908,14 +973,14 @@ class EpochAstrometry(ExoGaia):
         WHERE source_id = {self.source_id}
         """
 
-        gaia_job = Gaia.launch_job_async(gaia_query, dump_to_file=False, verbose=False)
+        gaia_job = Gaia.launch_job(gaia_query, dump_to_file=False, verbose=False)
 
         gaia_result = gaia_job.get_results()[0]
 
-        ra = float(gaia_result["ra"])
-        ra_error = float(gaia_result["ra_error"])
-        dec = float(gaia_result["dec"])
-        dec_error = float(gaia_result["dec_error"])
+        ra_ref = float(gaia_result["ra"])
+        ra_ref_error = float(gaia_result["ra_error"])
+        dec_ref = float(gaia_result["dec"])
+        dec_ref_error = float(gaia_result["dec_error"])
         parallax = float(gaia_result["parallax"])
         parallax_error = float(gaia_result["parallax_error"])
         pmra = float(gaia_result["pmra"])
@@ -925,8 +990,8 @@ class EpochAstrometry(ExoGaia):
         phot_g_mean_mag = float(gaia_result["phot_g_mean_mag"])
 
         if self.verbose:
-            print(f"\nRA = {ra:.3f} deg +/- {ra_error:.3f} mas")
-            print(f"Dec = {dec:.3f} deg +/- {dec_error:.3f} mas")
+            print(f"\nRA = {ra_ref:.3f} deg +/- {ra_ref_error:.3f} mas")
+            print(f"Dec = {dec_ref:.3f} deg +/- {dec_ref_error:.3f} mas")
             print(f"Parallax = {parallax:.3f} +/- {parallax_error:.3f} mas")
             print(f"Proper motion in RA = {pmra:.3f} +/- {pmra_error:.3f} mas/yr")
             print(f"Proper motion in Dec = {pmdec:.3f} +/- {pmdec_error:.3f} mas/yr")
@@ -944,8 +1009,8 @@ class EpochAstrometry(ExoGaia):
             if self.verbose:
                 print("Pseudocolor = None")
 
-        self.ra = ra
-        self.dec = dec
+        self.ra_ref = ra_ref
+        self.dec_ref = dec_ref
         self.parallax = parallax
         self.pm_ra = pmra
         self.pm_dec = pmdec
@@ -979,8 +1044,8 @@ class EpochAstrometry(ExoGaia):
 
                 if not np.isclose(self.u0_norm, uwe / ruwe, rtol=1e-2, atol=0.0):
                     warnings.warn(
-                        f"The renormalization value is {self.u0_norm:.6f} "
-                        f"whereas the ratio of uwe/ruwe is {uwe/ruwe:.6f}."
+                        f"The renormalization value is {self.u0_norm:.4f} "
+                        f"whereas the ratio of uwe/ruwe is {uwe/ruwe:.4f}."
                     )
 
         if "astrometric_excess_noise" in gaia_result.columns:
@@ -1002,8 +1067,8 @@ class EpochAstrometry(ExoGaia):
                     print(f"Non single star = {gaia_result['non_single_star']}")
 
         model_param = {
-            "ra": self.ra,
-            "dec": self.dec,
+            "ra_ref": self.ra_ref,
+            "dec_ref": self.dec_ref,
             "parallax": self.parallax,
             "pm_ra": self.pm_ra,
             "pm_dec": self.pm_dec,
@@ -1048,62 +1113,60 @@ class EpochAstrometry(ExoGaia):
         self.query_source(source_id, gaia_release=self.gaia_release)
 
         if self.verbose:
-            self.print_section("Retrieving epoch astrometry")
+            print_section("Retrieving epoch astrometry")
 
         self.source_id = source_id
-
-        if self.gaia_release in ["DR4", "DR5"]:
-            raise ValueError(
-                "The 'retrieve_data' method will only support "
-                "the future DR4 and DR5 data releases."
-            )
 
         if self.verbose:
             print(f"Gaia release: {self.gaia_release}")
             print(f"Source ID: {self.source_id}")
 
-        gaia_tables = [
-            "epoch_astrometry",
-            "bright_source_astrometry",
-            "nss_acceleration_astro",
-            "nss_two_body_orbit",
-        ]
+        raise NotImplementedError(
+            "Retrieval of Gaia DR4 and DR5 epoch astrometry is not yet implemented."
+        )
 
-        for table_item in gaia_tables:
-            if self.verbose:
-                print(f"\nTable: gaia{self.gaia_release.lower()}.{table_item}")
-
-            # Query Gaia source ID in NSS tables for selected Gaia source ID
-
-            gaia_query = f"""
-            SELECT *
-            FROM gaia{self.gaia_release.lower()}.{table_item}
-            WHERE source_id = {self.source_id}
-            """
-
-            # Launch the Gaia job and get the results
-
-            gaia_job = Gaia.launch_job_async(
-                gaia_query, dump_to_file=False, verbose=False
-            )
-
-            gaia_result = gaia_job.get_results()
-
-            if self.verbose:
-                if len(gaia_result) > 0:
-                    print("\nTable parameters:")
-                    for param_item in gaia_result[0].columns:
-                        print(f"   - {param_item} = {gaia_result[0][param_item]}")
-
-            else:
-                if self.verbose:
-                    print(f"\nSource not found in {table_item}")
-
-            if exclude_outliers:
-                pass
-
-            if combine_ccds:
-                pass
+        # gaia_tables = [
+        #     "epoch_astrometry",
+        #     "bright_source_astrometry",
+        #     "nss_acceleration_astro",
+        #     "nss_two_body_orbit",
+        # ]
+        #
+        # for table_item in gaia_tables:
+        #     if self.verbose:
+        #         print(f"\nTable: gaia{self.gaia_release.lower()}.{table_item}")
+        #
+        #     # Query Gaia source ID in NSS tables for selected Gaia source ID
+        #
+        #     gaia_query = f"""
+        #     SELECT *
+        #     FROM gaia{self.gaia_release.lower()}.{table_item}
+        #     WHERE source_id = {self.source_id}
+        #     """
+        #
+        #     # Launch the Gaia job and get the results
+        #
+        #     gaia_job = Gaia.launch_job_async(
+        #         gaia_query, dump_to_file=False, verbose=False
+        #     )
+        #
+        #     gaia_result = gaia_job.get_results()
+        #
+        #     if self.verbose:
+        #         if len(gaia_result) > 0:
+        #             print("\nTable parameters:")
+        #             for param_item in gaia_result[0].columns:
+        #                 print(f"   - {param_item} = {gaia_result[0][param_item]}")
+        #
+        #     else:
+        #         if self.verbose:
+        #             print(f"\nSource not found in {table_item}")
+        #
+        #     if exclude_outliers:
+        #         pass
+        #
+        #     if combine_ccds:
+        #         pass
 
     @beartype
     def retrieve_gaia_bh3(
@@ -1147,14 +1210,14 @@ class EpochAstrometry(ExoGaia):
         _ = self.query_source(source_id=self.source_id, gaia_release="DR3")
 
         if self.verbose:
-            self.print_section("Gaia BH3 epoch data")
+            print_section("Gaia BH3 epoch data")
 
         file_folder = Path(__file__).resolve().parent.parent
         data_file = file_folder / "data/gaiabh3_epochast.dat"
 
         if self.verbose:
             print(f"Gaia release: {self.gaia_release}")
-            print(f"Reference epoch: {self.ref_epoch}")
+            print(f"Reference epoch: {self.ref_epoch.tcb.jyear_str}")
             print(f"Source ID: {self.source_id}")
 
         if self.primary_mass is None:
@@ -1294,13 +1357,11 @@ class EpochAstrometry(ExoGaia):
         self.query_source(self.source_id, gaia_release="DR3")
 
         if self.verbose:
-            self.print_section("Retrieving epoch astrometry")
-
-        data_folder = Path.home() / ".exogaia"
+            print_section("Retrieving epoch astrometry")
 
         if self.verbose:
             print(f"Gaia release: {self.gaia_release}")
-            print(f"Reference epoch: {self.ref_epoch}")
+            print(f"Reference epoch: {self.ref_epoch.tcb.jyear_str}")
             print(f"Source ID: {self.source_id}")
 
             print(
@@ -1308,14 +1369,8 @@ class EpochAstrometry(ExoGaia):
                 f"+/- {self.primary_mass[1]:.2f}"
             )
 
-        if not data_folder.exists():
-            if self.verbose:
-                print(f"Creating folder: {str(data_folder)}")
-
-            data_folder.mkdir(parents=True, exist_ok=False)
-
         file_name = "GAIA_DR4_PRERELEASE_EPOCH_ASTROMETRY_RAW.xml"
-        data_file = data_folder / file_name
+        data_file = self.data_folder / file_name
         url = (
             "https://home.strw.leidenuniv.nl/~stolker/exogaia/"
             "GAIA_DR4_PRERELEASE_EPOCH_ASTROMETRY_RAW.xml"
@@ -1329,7 +1384,7 @@ class EpochAstrometry(ExoGaia):
                 url=url,
                 known_hash="f81f4dc11064b72d99f536e3d34365694b839629b424d8247a4b5501016f3ce3",
                 fname=file_name,
-                path=data_folder,
+                path=self.data_folder,
                 progressbar=True,
             )
 
@@ -1511,10 +1566,667 @@ class EpochAstrometry(ExoGaia):
 
         # Store times as Julian years and days relative to ref_epoch
 
-        self.data_table["relative_time_year"] = (
-            self.data_table["obs_time_tcb"] - self.ref_epoch.tcb.jyear
-        )
+        time_from_ref = self.data_table["obs_time_tcb"] - self.ref_epoch.tcb.jyear
+
+        self.data_table["relative_time_year"] = time_from_ref.to_numpy()
 
         self.data_table["relative_time_day"] = self.data_table[
             "relative_time_year"
         ] * u.year.to(u.day)
+
+
+class HipparcosAstrometry(EpochAstrometry):
+    """
+    Class for querying Hipparcos epoch astrometry data.
+    """
+
+    @beartype
+    def __init__(
+        self,
+        hip_id: int,
+        primary_mass: typing.Tuple[Real, Real],
+        verbose: bool = True,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        primary_mass : tuple(float, float)
+            Primary mass and uncertainty (Msun). The primary mass is
+            not stored if the argument is set to ``None``. When
+            simulating data with
+            :func:`~exogaia.data.EpochAstrometry.simulate_data`,
+            a mass will be drawn from an initial mass function if
+            the argument of ``primary_mass`` is set to ``None``.
+        verbose : bool
+            Print some information.
+
+        Returns
+        -------
+        NoneType
+            None
+        """
+
+        super().__init__(primary_mass, verbose)
+
+        self.verbose = verbose
+
+        if self.verbose:
+            print_section("Hipparcos astrometry", bound_char="=")
+
+        self.data_folder = Path.home() / ".exogaia"
+
+        if not self.data_folder.exists():
+            if self.verbose:
+                print(f"Creating folder: {str(self.data_folder)}")
+
+            self.data_folder.mkdir(parents=True, exist_ok=False)
+
+        self.hip_id = hip_id
+        self.gaia_dr3_id = None
+        self.hp_mag = None
+        self.solution_type = None
+        self.u0_norm = 1.0  # Needed for the RUWE calculation
+
+        self.hgca_pm_hip = None
+        self.hgca_pm_gaia = None
+        self.hgca_pm_hg = None
+
+        self.hgca_cov_hip = None
+        self.hgca_cov_gaia = None
+        self.hgca_cov_hg = None
+
+        self.hgca_dpm_gaia_hg = None
+        self.hgca_dv_gaia_hg = None
+
+        self.hgca_epoch_gaia = None
+        self.hgca_epoch_hip = None
+
+        self.hgca_chisq = None
+
+        self.ref_epoch = Time(1991.25, format="jyear", scale="tcb")
+        self.time_start = Time("1989-11-26", scale="utc")
+        self.time_end = Time("1993-08-15", scale="utc")
+
+        if self.verbose:
+            print(f"Reference epoch: {self.ref_epoch.tcb.jyear_str}")
+
+            print(
+                f"Primary mass (Msun): {primary_mass[0]:.2f} "
+                f"+/- {primary_mass[1]:.2f}"
+            )
+
+    @beartype
+    def retrieve_data(
+        self,
+    ) -> dict:
+        """
+        Retrieve Hipparcos-2 epoch astrometry.
+
+        Query SIMBAD for the Gaia DR3 counterpart of the Hipparcos
+        source, download the source-specific Intermediate Astrometric
+        Data file when it is not already available locally, and read
+        the reference astrometric solution from its header. Rejected
+        or invalid observations are removed, and the accepted
+        along-scan measurements are stored in ``self.data_table``.
+
+        Returns
+        -------
+        dict
+            Reference astrometric parameters used for the
+            Hipparcos-2 solution.
+        """
+
+        if self.verbose:
+            print_section("Retrieve Hipparcos data")
+
+        # Query SIMBAD for the corresponding Gaia DR3 source ID
+
+        Simbad.add_votable_fields("ids")
+        simbad_result = Simbad.query_object(f"HIP {self.hip_id}")
+
+        if simbad_result is None or len(simbad_result) == 0:
+            raise ValueError(f"HIP {self.hip_id} was not found in SIMBAD.")
+
+        gaia_matches = [
+            identifier.strip()
+            for identifier in simbad_result["ids"][0].split("|")
+            if identifier.strip().startswith("Gaia DR3 ")
+        ]
+
+        if not gaia_matches:
+            raise ValueError(
+                f"HIP {self.hip_id} does not have a Gaia DR3 ID in SIMBAD."
+            )
+
+        self.gaia_dr3_id = np.int64(gaia_matches[0].removeprefix("Gaia DR3 ").strip())
+
+        # Hipparcos epochs
+        # The Hipparcos IAD epochs are provided as offsets in Julian years (?)
+        # relative to J1991.25. These epochs are represented on the TCB scale
+        # for consistency with the Gaia epoch astrometry. The adopted time
+        # scale has a negligible effect (?) at Hipparcos precision.
+
+        if self.verbose:
+            print(f"Hipparcos ID: {self.hip_id}")
+            print(f"Gaia DR3 ID: {self.gaia_dr3_id}")
+            print(f"Reference epoch: {self.ref_epoch.tcb.jyear_str}")
+
+        # Download the source-specific Hipparcos-2 IAD file
+
+        hip_str = f"{self.hip_id:06d}"  # e.g. 25486 -> "025486"
+        hip_folder = f"H{hip_str[:3]}"  # "H025"
+        file_name = f"H{hip_str}.d"  # "H025486.d"
+
+        data_file = self.data_folder / file_name
+
+        url = (
+            "https://home.strw.leidenuniv.nl/"
+            "~stolker/exogaia/ResRec_JavaTool_2014/"
+            f"{hip_folder}/{file_name}"
+        )
+
+        if not data_file.exists():
+            if self.verbose:
+                print()
+
+            pooch.retrieve(
+                url=url,
+                known_hash=None,
+                fname=file_name,
+                path=self.data_folder,
+                progressbar=True,
+            )
+
+        # Read Hipparcos-2 header
+
+        header = read_hipparcos_header(data_file)
+
+        ra_ref = header["ra_deg"]
+        ra_ref_error = header["ra_error"]
+        dec_ref = header["dec_deg"]
+        dec_ref_error = header["dec_error"]
+        parallax = header["parallax"]
+        parallax_error = header["parallax_error"]
+        pmra = header["pm_ra"]
+        pmra_error = header["pm_ra_error"]
+        pmdec = header["pm_dec"]
+        pmdec_error = header["pm_dec_error"]
+        hp_mag = header["hp_mag"]
+
+        dpm_ra = None
+        dpm_ra_error = None
+        dpm_dec = None
+        dpm_dec_error = None
+        ddpm_ra = None
+        ddpm_ra_error = None
+        ddpm_dec = None
+        ddpm_dec_error = None
+
+        self.solution_type = header["solution_type"]
+
+        if self.solution_type in (7, 9):
+            dpm_ra = header["dpmRA"]
+            dpm_ra_error = header["e_dpmRA"]
+            dpm_dec = header["dpmDE"]
+            dpm_dec_error = header["e_dpmDE"]
+
+            if self.solution_type == 9:
+                ddpm_ra = header["ddpmRA"]
+                ddpm_ra_error = header["e_ddpmRA"]
+                ddpm_dec = header["ddpmDE"]
+                ddpm_dec_error = header["e_ddpmDE"]
+
+        if self.verbose:
+            solution_labels = {
+                1: "stochastic",
+                5: "5-parameters",
+                7: "7-parameters",
+                9: "9-parameters",
+            }
+
+            sol_type = solution_labels.get(self.solution_type, "other")
+
+            print(f"\nSolution type: {header['solution_type']} ({sol_type})")
+            print(f"F2: {header['f2']:.2f}")
+
+            print(f"\nRA = {ra_ref:.3f} deg +/- {ra_ref_error:.3f} mas")
+            print(f"Dec = {dec_ref:.3f} deg +/- {dec_ref_error:.3f} mas")
+            print(f"Parallax = {parallax:.3f} +/- {parallax_error:.3f} mas")
+            print(f"Proper motion in RA = {pmra:.3f} +/- {pmra_error:.3f} mas/yr")
+            print(f"Proper motion in Dec = {pmdec:.3f} +/- {pmdec_error:.3f} mas/yr")
+            print(f"Variance inflation: {header['var']:.2f} mas")
+
+            if self.solution_type in (7, 9):
+                print(f"\ndmu/dt in RA = {dpm_ra:.3f} +/- {dpm_ra_error:.3f} mas/yr^2")
+                print(f"dmu/dt in Dec = {dpm_dec:.3f} +/- {dpm_dec_error:.3f} mas/yr^2")
+
+                if self.solution_type == 9:
+                    print(
+                        f"\nd^2mu/d^2t in RA = {ddpm_ra:.3f} +/- {ddpm_ra_error:.3f} mas/yr^3"
+                    )
+                    print(
+                        f"d^2mu/d^2t in Dec = {ddpm_dec:.3f} +/- {ddpm_dec_error:.3f} mas/yr^3"
+                    )
+
+            print(f"\nHp-band magnitude = {hp_mag:.3f}")
+
+        self.ra_ref = ra_ref
+        self.dec_ref = dec_ref
+        self.parallax = parallax
+        self.pm_ra = pmra
+        self.pm_dec = pmdec
+        self.hp_mag = hp_mag
+
+        model_param = {
+            "ra_ref": self.ra_ref,
+            "dec_ref": self.dec_ref,
+            "parallax": self.parallax,
+            "pm_ra": self.pm_ra,
+            "pm_dec": self.pm_dec,
+            "hp_mag": self.hp_mag,
+        }
+
+        # Read Hipparcos-2 data
+        # https://www.cosmos.esa.int/web/hipparcos/hipparcos-2
+
+        #   3 - 6   I4                 IORB     Orbit Number
+        #   8 - 14  F7.4   yr-1991.25  EPOCH    Epoch
+        #  16 - 22  F7.4               PARF     Parallax factor
+        #  24 - 30  F7.4               CPSI     cos(psi) (1)
+        #  32 - 38  F7.4               SPSI     sin(psi) (1)
+        #  40 - 46  F7.2   mas         RES      Abscissa residual
+        #  48 - 53  F6.2   mas         SRES     Formal error on abscissa residual (2)
+        # --------------------------------------------------------------------------------
+        # Note (1): The Hipparcos-2 angle psi is related to the Gaia scan angle theta as
+        # theta = pi/2 - psi. See Brandt et al. (2021), Section 2.
+        # Note (2): Rejected observations are marked as negative or zero (0.00) values.
+
+        dtype = np.dtype(
+            [
+                ("iorb", np.int32),
+                ("epoch", np.float64),
+                ("parf", np.float64),
+                ("cpsi", np.float64),
+                ("spsi", np.float64),
+                ("res", np.float64),
+                ("sres", np.float64),
+            ]
+        )
+
+        iad_data = np.loadtxt(data_file, dtype=dtype)
+
+        # In the Hipparcos-2 IAD, SRES <= 0 marks observations that
+        # were rejected from the published astrometric solution
+
+        accepted = (
+            np.isfinite(iad_data["epoch"])
+            & np.isfinite(iad_data["parf"])
+            & np.isfinite(iad_data["cpsi"])
+            & np.isfinite(iad_data["spsi"])
+            & np.isfinite(iad_data["res"])
+            & np.isfinite(iad_data["sres"])
+            & (iad_data["sres"] > 0.0)
+        )
+
+        n_rejected = np.count_nonzero(~accepted)
+
+        iad_data = iad_data[accepted]
+
+        # Hipparcos uses theta = pi/2 - psi with psi and theta
+        # the Gaia and Hipparcos scan angles, respectively.
+        # header['var'] is nonzero only when self.solution_type == 1
+
+        self.data_table = pd.DataFrame(
+            {
+                "orbit_number": iad_data["iorb"],
+                "parallax_factor_al": iad_data["parf"],
+                "sin_scan_ang": iad_data["cpsi"],
+                "cos_scan_ang": iad_data["spsi"],
+            }
+        )
+
+        # Check if the dataframe contains data
+
+        if self.data_table.empty:
+            raise ValueError(
+                f"No accepted Hipparcos scans remain for HIP {self.hip_id}."
+            )
+
+        # Store times as Julian years and days relative to hip_ref_epoch
+
+        self.data_table["obs_time_tcb"] = self.ref_epoch.tcb.jyear + iad_data["epoch"]
+
+        self.data_table["relative_time_year"] = iad_data["epoch"]
+
+        self.data_table["relative_time_day"] = self.data_table[
+            "relative_time_year"
+        ] * u.year.to(u.day)
+
+        # Star track, relative to RA/Dec at hip_ref_epoch
+
+        obs_pos_al = (
+            self.parallax * self.data_table["parallax_factor_al"]
+            + self.pm_ra
+            * self.data_table["relative_time_year"]
+            * self.data_table["sin_scan_ang"]
+            + self.pm_dec
+            * self.data_table["relative_time_year"]
+            * self.data_table["cos_scan_ang"]
+        )
+
+        if self.solution_type in [7, 9]:
+            obs_pos_al += (
+                0.5
+                * dpm_ra
+                * self.data_table["relative_time_year"] ** 2
+                * self.data_table["sin_scan_ang"]
+                + 0.5
+                * dpm_dec
+                * self.data_table["relative_time_year"] ** 2
+                * self.data_table["cos_scan_ang"]
+            )
+
+        if self.solution_type == 9:
+            obs_pos_al += (
+                ddpm_ra
+                / 6.0
+                * self.data_table["relative_time_year"] ** 3
+                * self.data_table["sin_scan_ang"]
+                + ddpm_dec
+                / 6.0
+                * self.data_table["relative_time_year"] ** 3
+                * self.data_table["cos_scan_ang"]
+            )
+
+        self.data_table["centroid_pos_al"] = obs_pos_al + iad_data["res"]
+        self.data_table["centroid_pos_error_al"] = iad_data["sres"]
+
+        # Subtract the jitter which is nonzero when solution_type = 1
+
+        # self.data_table["centroid_pos_error_al"] = np.sqrt(
+        #     iad_data["sres"] ** 2 - header["var"] ** 2
+        # )
+
+        if self.verbose:
+            print(f"\nAccepted scans: {len(self.data_table)}")
+            print(f"Rejected scans: {n_rejected}")
+            print("\nReference: van Leeuwen F. (2007), ASSL, 350")
+
+        return model_param
+
+    @beartype
+    def add_hgca(
+        self,
+    ) -> pd.DataFrame:
+        """
+        Retrieve Hipparcos–Gaia Catalog of Accelerations data.
+
+        The Gaia EDR3 version of the Hipparcos–Gaia Catalog of
+        Accelerations (HGCA) is downloaded when it is not already
+        available locally. The catalog is searched for the selected
+        Hipparcos source, identified by `self.hip_id`.
+
+        For the matching source, the Hipparcos, Gaia, and long-term
+        Hipparcos–Gaia proper-motion vectors and covariance matrices
+        are stored as class attributes. The Gaia proper-motion anomaly
+        is calculated as
+
+        .. math::
+
+        ```
+        \\Delta\boldsymbol{\\mu}_{\\mathrm{Gaia-HG}}
+        =
+        \\boldsymbol{\\mu}_{\\mathrm{Gaia}}
+        -
+        \\boldsymbol{\\mu}_{\\mathrm{HG}},
+        ```
+
+        where :math:`\\boldsymbol{\\mu}_{\\mathrm{HG}}` is the long-term
+        proper motion derived from the Hipparcos and Gaia positions.
+        The anomaly amplitude and its equivalent tangential velocity
+        are also calculated and stored.
+
+        Returns
+        -------
+        DataFrame
+            One-row table containing the matching HGCA source.
+        """
+
+        if self.verbose:
+            print_section("Retrieve Hipparcos–Gaia Catalog of Accelerations")
+
+        def proper_motion_cov(
+            pmra_error: float,
+            pmdec_error: float,
+            correlation: float,
+        ) -> np.ndarray:
+            """
+            Construct a proper-motion covariance matrix.
+
+            Parameters
+            ----------
+            pmra_error : float
+                Uncertainty on proper motion in RA* (mas/yr).
+            pmdec_error : float
+                Uncertainty on proper motion in Dec (mas/yr).
+            correlation : float
+                Correlation coefficient between the RA* and
+                Dec proper motions.
+
+            Returns
+            -------
+            np.ndarray
+                Proper-motion covariance matrix with shape (2, 2),
+                in (mas/yr)^2.
+            """
+
+            covariance = correlation * pmra_error * pmdec_error
+
+            cov_matrix = np.array(
+                [
+                    [pmra_error**2, covariance],
+                    [covariance, pmdec_error**2],
+                ],
+            )
+
+            return cov_matrix
+
+        # Download the HGCA
+
+        file_name = "HGCA_vEDR3.fits"
+        fits_file = self.data_folder / file_name
+        url = "https://cdsarc.cds.unistra.fr/ftp/J/ApJS/254/42/HGCA_vEDR3.fits"
+
+        if not fits_file.exists():
+            pooch.retrieve(
+                url=url,
+                known_hash="23684d583baaa236775108b360c650e79770a695e16914b1201f290c1826065c",
+                fname=file_name,
+                path=self.data_folder,
+                progressbar=True,
+            )
+
+            if self.verbose:
+                print()
+
+        # Read HGCA and select source
+
+        hgca_table = Table.read(fits_file)
+        hgca_sources = hgca_table["hip_id"]
+
+        hgca_match = hgca_table[hgca_sources == self.hip_id]
+        n_match = len(hgca_match)
+
+        if len(hgca_match) == 0:
+            raise ValueError(
+                f"HIP {self.hip_id} is not present in the "
+                "Hipparcos-Gaia Catalog of Accelerations."
+            )
+
+        if n_match > 1:
+            raise RuntimeError(f"Found {n_match} HGCA entries for HIP {self.hip_id}.")
+
+        row = hgca_match[0]
+
+        # Proper-motion vectors (in mas/yr)
+
+        self.hgca_pm_hip = np.array(
+            [
+                row["pmra_hip"],
+                row["pmdec_hip"],
+            ],
+        )
+
+        self.hgca_pm_gaia = np.array(
+            [
+                row["pmra_gaia"],
+                row["pmdec_gaia"],
+            ],
+        )
+
+        self.hgca_pm_hg = np.array(
+            [
+                row["pmra_hg"],
+                row["pmdec_hg"],
+            ],
+        )
+
+        # Construct the 2 x 2 covariance matrices
+
+        self.hgca_cov_hip = proper_motion_cov(
+            pmra_error=row["pmra_hip_error"],
+            pmdec_error=row["pmdec_hip_error"],
+            correlation=row["pmra_pmdec_hip"],
+        )
+
+        self.hgca_cov_gaia = proper_motion_cov(
+            pmra_error=row["pmra_gaia_error"],
+            pmdec_error=row["pmdec_gaia_error"],
+            correlation=row["pmra_pmdec_gaia"],
+        )
+
+        self.hgca_cov_hg = proper_motion_cov(
+            pmra_error=row["pmra_hg_error"],
+            pmdec_error=row["pmdec_hg_error"],
+            correlation=row["pmra_pmdec_hg"],
+        )
+
+        # Gaia minus Hipparcos-Gaia proper-motion anomaly (mas/yr)
+        self.hgca_dpm_gaia_hg = self.hgca_pm_gaia - self.hgca_pm_hg
+        self.hgca_cov_dpm_gaia_hg = self.hgca_cov_gaia + self.hgca_cov_hg
+
+        # The Gaia and Hipparcos central epochs differ
+        # slightly between RA and Dec in the HGCA.
+
+        self.hgca_epoch_hip = np.array(
+            [
+                row["epoch_ra_hip"],
+                row["epoch_dec_hip"],
+            ],
+        )
+
+        self.hgca_epoch_gaia = np.array(
+            [
+                row["epoch_ra_gaia"],
+                row["epoch_dec_gaia"],
+            ],
+        )
+
+        # HGCA chi-square
+
+        self.hgca_chisq = row["chisq"]
+
+        # Store the Hipparcos proper motion. This will overwrite
+        # the proper motion attribute stored by query_data().
+
+        self.pm_ra = row["pmra_hip"]
+        self.pm_dec = row["pmdec_hip"]
+        self.pm_ra_error = row["pmra_hip_error"]
+        self.pm_dec_error = row["pmdec_hip_error"]
+
+        # Conversion factor between angular proper motion and
+        # tangential velocity. An object with a proper motion
+        # of 1 arcsec/yr at a distance of 1 pc moves tangentially
+        # by 1 au each year. Therefore,
+        #
+        #     v_tan (km/s) = (1 au / yr) × μ / ϖ,
+        #
+        # where μ and ϖ are expressed in the same angular units
+        # (e.g. both in mas). The quantity 1 au/yr equals
+        # approximately 4.74047 km/s.
+        # Use the parallax from HGCA.
+
+        auyear_kms = (c.au / u.year).to("km/s").value
+        self.hgca_dv_gaia_hg = auyear_kms * self.hgca_dpm_gaia_hg / self.parallax
+
+        if self.verbose:
+            print(f"Hipparcos ID: {row['hip_id']}")
+
+            if self.gaia_dr3_id is not None:
+                print(f"Gaia DR3 ID: {self.gaia_dr3_id}")
+
+            print(f"HGCA chi-square: {self.hgca_chisq:.2f}")
+
+            # Proper-motion uncertainties from the covariance matrices
+
+            pm_hip_error = np.sqrt(np.diag(self.hgca_cov_hip))
+            pm_gaia_error = np.sqrt(np.diag(self.hgca_cov_gaia))
+            pm_hg_error = np.sqrt(np.diag(self.hgca_cov_hg))
+
+            # Assuming the Gaia and HG proper-motion measurements are independent
+            self.hgca_cov_dpm_gaia_hg = self.hgca_cov_gaia + self.hgca_cov_hg
+
+            # Uncertainties of the RA and Dec components (mas/yr)
+            self.hgca_dpm_gaia_hg_error = np.sqrt(np.diag(self.hgca_cov_dpm_gaia_hg))
+
+            # Covariance of the tangential velocity anomaly (km/s)^2
+            self.hgca_cov_dv_gaia_hg = (
+                auyear_kms / self.parallax
+            ) ** 2 * self.hgca_cov_dpm_gaia_hg
+
+            # 1-sigma uncertainties
+            dv_error = np.sqrt(np.diag(self.hgca_cov_dv_gaia_hg))
+
+            print(
+                "\nHipparcos proper motion:"
+                f"\n   PM RA  = {self.hgca_pm_hip[0]:.4f}"
+                f" +/- {pm_hip_error[0]:.4f} mas/yr"
+                f"\n   PM Dec = {self.hgca_pm_hip[1]:.4f}"
+                f" +/- {pm_hip_error[1]:.4f} mas/yr"
+            )
+
+            print(
+                "\nGaia proper motion:"
+                f"\n   PM RA  = {self.hgca_pm_gaia[0]:.4f}"
+                f" +/- {pm_gaia_error[0]:.4f} mas/yr"
+                f"\n   PM Dec = {self.hgca_pm_gaia[1]:.4f}"
+                f" +/- {pm_gaia_error[1]:.4f} mas/yr"
+            )
+
+            print(
+                "\nHipparcos-Gaia proper motion:"
+                f"\n   PM RA  = {self.hgca_pm_hg[0]:.4f}"
+                f" +/- {pm_hg_error[0]:.4f} mas/yr"
+                f"\n   PM Dec = {self.hgca_pm_hg[1]:.4f}"
+                f" +/- {pm_hg_error[1]:.4f} mas/yr"
+            )
+
+            print(
+                "\nGaia-HG proper motion anomaly:"
+                f"\n   Delta PM RA  = {self.hgca_dpm_gaia_hg[0]:.4f}"
+                f" +/- {self.hgca_dpm_gaia_hg_error[0]:.4f} mas/yr"
+                f"\n   Delta PM Dec = {self.hgca_dpm_gaia_hg[1]:.4f}"
+                f" +/- {self.hgca_dpm_gaia_hg_error[1]:.4f} mas/yr"
+            )
+
+            print(
+                "\nTangential velocity anomaly:"
+                f"\n   Delta v RA   = {self.hgca_dv_gaia_hg[0]:.4f}"
+                f" +/- {dv_error[0]:.4f} km/s"
+                f"\n   Delta v Dec  = {self.hgca_dv_gaia_hg[1]:.4f}"
+                f" +/- {dv_error[1]:.4f} km/s"
+            )
+
+            print("\nReference: Brandt T. D. (2021), ApJS, 254, 42")
+
+        return hgca_match.to_pandas()

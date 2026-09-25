@@ -13,10 +13,10 @@ import numpy as np
 from astropy import units as u
 from beartype import beartype, typing
 
-from exogaia.core import ExoGaia
+from exogaia.utils import print_section
 
 
-class OccurrenceRate(ExoGaia):
+class OccurrenceRate:
     """
     Planet occurrence-rate model and population generator.
 
@@ -69,7 +69,7 @@ class OccurrenceRate(ExoGaia):
         self.verbose = verbose
 
         if self.verbose:
-            self.print_section("Occurrence rate")
+            print_section("Occurrence rate", bound_char="=")
 
         if isinstance(primary_mass, np.ndarray):
             self.primary_mass = primary_mass
@@ -272,6 +272,7 @@ class OccurrenceRate(ExoGaia):
     def sample_planets(
         self,
         allow_reject: bool = True,
+        seed: typing.Optional[int] = None,
     ) -> typing.Tuple[np.ndarray, np.ndarray]:
         """
         Draw a synthetic planet population for the current stellar sample.
@@ -311,6 +312,9 @@ class OccurrenceRate(ExoGaia):
             probability equal to its integrated occurrence rate.
             If ``False``, every star is forced to host exactly
             one planet.
+        seed : int, None
+            Seed for the random number generator. If ``None``
+            (default), a fresh random generator is used.
 
         Returns
         -------
@@ -325,9 +329,11 @@ class OccurrenceRate(ExoGaia):
         """
 
         if self.verbose:
-            self.print_section("Sample planets")
+            print_section("Sample planets")
 
             print(f"Number of stars: {self.primary_mass.size}")
+
+        rng = np.random.default_rng(seed)
 
         sma_list = np.full(self.primary_mass.size, np.nan)
         mass_list = np.full(self.primary_mass.size, np.nan)
@@ -340,7 +346,7 @@ class OccurrenceRate(ExoGaia):
             occ_int = self.integrate_occ_rate(star_mass)
 
             if allow_reject:
-                ran_num = np.random.rand()
+                ran_num = rng.random()
             else:
                 ran_num = -np.inf
 
@@ -362,21 +368,21 @@ class OccurrenceRate(ExoGaia):
 
                 p_sma = occ_pdf.sum(axis=1)
                 cdf_sma = np.cumsum(p_sma)
-                i_sma = np.searchsorted(cdf_sma, np.random.rand())
+                i_sma = np.searchsorted(cdf_sma, rng.random())
 
                 # Sample mass conditional on semi-major aixs
 
                 p_mass_given_sma = occ_pdf[i_sma] / p_sma[i_sma]
                 cdf_mass = np.cumsum(p_mass_given_sma)
-                i_mass = np.searchsorted(cdf_mass, np.random.rand())
+                i_mass = np.searchsorted(cdf_mass, rng.random())
 
                 # Sample inside log(sma) and log(mass) bin
 
-                log_sma = np.random.uniform(
+                log_sma = rng.uniform(
                     self.log_sma_edges[i_sma], self.log_sma_edges[i_sma + 1]
                 )
 
-                log_mass = np.random.uniform(
+                log_mass = rng.uniform(
                     self.log_mass_edges[i_mass], self.log_mass_edges[i_mass + 1]
                 )
 

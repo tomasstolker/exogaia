@@ -1,7 +1,7 @@
 import os
 import pytest
 
-from exogaia.data import EpochAstrometry
+from exogaia.data import GaiaAstrometry
 from exogaia.leastsq import LeastSquares
 from exogaia.samplers import MCMCSampler
 from exogaia.results import SamplingResults
@@ -13,7 +13,7 @@ class TestExoGaia:
 
         self.test_dir = os.path.dirname(__file__) + "/"
 
-        self.epoch_astrom = EpochAstrometry(primary_mass=None, gaia_release="DR4")
+        self.epoch_astrom = GaiaAstrometry(primary_mass=None, gaia_release="DR4")
 
         self.epoch_astrom.retrieve_gaia_bh3(exclude_outliers=True, combine_ccds=True)
 
@@ -39,6 +39,9 @@ class TestExoGaia:
 
     def test_fit_jitter(self) -> None:
         self.least_squares.orbit_fit(inc_jitter=True, plot_file=None)
+
+        assert len(self.least_squares.best_param) == 12
+        assert self.least_squares.param_cov.shape == (12, 12)
 
     def test_mcmc_sampler(self) -> None:
         sampler = MCMCSampler(

@@ -4,14 +4,6 @@ exogaia package
 Submodules
 ----------
 
-exogaia.core module
--------------------
-
-.. automodule:: exogaia.core
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
 exogaia.data module
 -------------------
 

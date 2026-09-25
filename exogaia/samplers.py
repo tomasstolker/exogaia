@@ -17,7 +17,6 @@ import reddemcee
 from beartype import beartype, typing
 from schwimmbad import MPIPool
 
-from exogaia.core import ExoGaia
 from exogaia.data import EpochAstrometry
 from exogaia.leastsq import LeastSquares
 from exogaia.models import KeplerModel
@@ -27,10 +26,10 @@ from exogaia.priors import (
     SinPrior,
     UniformPrior,
 )
-from exogaia.utils import param_list_to_dict
+from exogaia.utils import param_list_to_dict, print_section
 
 
-class NestedSampler(ExoGaia):
+class NestedSampler:
     """
     Class for nested sampling with ``MultiNest`` and ``Dynesty``.
     """
@@ -56,7 +55,7 @@ class NestedSampler(ExoGaia):
             None
         """
 
-        self.print_section("Nested sampler")
+        print_section("Nested sampler", bound_char="=")
 
         self.epoch_astrometry = epoch_astrometry
         self.data_table = epoch_astrometry.data_table
@@ -333,7 +332,7 @@ class NestedSampler(ExoGaia):
 
         import pymultinest
 
-        self.print_section("Run MultiNest")
+        print_section("Run MultiNest")
 
         self.output_folder = output_folder
 
@@ -569,7 +568,7 @@ class NestedSampler(ExoGaia):
             None
         """
 
-        self.print_section("Run Dynesty")
+        print_section("Run Dynesty")
 
         self.output_folder = output_folder
 
@@ -827,7 +826,7 @@ class NestedSampler(ExoGaia):
             mpi_rank = 0
 
 
-class MCMCSampler(ExoGaia):
+class MCMCSampler:
     """
     Class for MCMC sampling with ``emcee`` and ``reddemcee``.
     """
@@ -853,7 +852,7 @@ class MCMCSampler(ExoGaia):
             None
         """
 
-        self.print_section("MCMC sampler")
+        print_section("MCMC sampler", bound_char="=")
 
         self.epoch_astrometry = epoch_astrometry
         self.data_table = epoch_astrometry.data_table
@@ -1133,7 +1132,7 @@ class MCMCSampler(ExoGaia):
             None
         """
 
-        self.print_section("Run emcee")
+        print_section("Run emcee")
 
         sampler = emcee.EnsembleSampler(
             nwalkers=n_walkers,
@@ -1203,7 +1202,7 @@ class MCMCSampler(ExoGaia):
             None
         """
 
-        self.print_section("Run reddemcee")
+        print_section("Run reddemcee")
 
         sampler = reddemcee.PTSampler(
             nwalkers=n_walkers,

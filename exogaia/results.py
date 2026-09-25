@@ -15,12 +15,11 @@ from corner import corner
 from matplotlib.figure import Figure
 from scipy.stats import norm
 
-from exogaia.core import ExoGaia
 from exogaia.models import KeplerModel
-from exogaia.utils import param_list_to_dict
+from exogaia.utils import param_list_to_dict, print_section
 
 
-class SamplingResults(ExoGaia):
+class SamplingResults:
     """
     Class for plotting fit results.
     """
@@ -45,7 +44,7 @@ class SamplingResults(ExoGaia):
             None
         """
 
-        self.print_section("Fit results")
+        print_section("Fit results", bound_char="=")
 
         self.pickle_file = pickle_file
 
@@ -139,7 +138,7 @@ class SamplingResults(ExoGaia):
             for further adjustments of the plot.
         """
 
-        self.print_section("Plot walkers")
+        print_section("Plot walkers")
 
         if thin is None:
             thin = 1
@@ -221,7 +220,7 @@ class SamplingResults(ExoGaia):
             for further adjustments of the plot.
         """
 
-        self.print_section("Plot posterior")
+        print_section("Plot posterior")
 
         post_samples = np.copy(self.samples)
 
@@ -358,7 +357,7 @@ class SamplingResults(ExoGaia):
             for further adjustments of the plot.
         """
 
-        self.print_section("Plot residuals")
+        print_section("Plot residuals")
 
         # Epoch astrometry data
         obs_time = self.data_table["obs_time_tcb"].to_numpy()
@@ -505,7 +504,7 @@ class SamplingResults(ExoGaia):
         delta_ra, delta_dec = kepler_model.calc_orbit(model_param, obs_time=None)
         residuals = kepler_model.calc_residuals(model_param)
 
-        self.print_section("Plot orbit")
+        print_section("Plot orbit")
 
         fig = plt.figure(figsize=(4, 4))
         ax = plt.gca()
@@ -586,7 +585,8 @@ class SamplingResults(ExoGaia):
         # Position at time of periastron (in Julian years)
 
         t_per = (
-            self.ref_epoch.value + (model_param["per"] * model_param["tau"]) / 365.25
+            self.ref_epoch.tcb.jyear
+            + (model_param["per"] * model_param["tau"]) / 365.25
         )
 
         delta_ra_per, delta_dec_per = kepler_model.calc_orbit(

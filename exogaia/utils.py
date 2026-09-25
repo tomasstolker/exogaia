@@ -2,6 +2,7 @@
 Module with utility functions.
 """
 
+from pathlib import Path
 from numbers import Real
 
 import numpy as np
@@ -9,6 +10,7 @@ import pandas as pd
 
 from beartype import beartype, typing
 from nsstools import NssSource
+from scipy.linalg import cho_factor, cho_solve
 from scipy.optimize import brentq
 
 # @beartype
@@ -176,7 +178,7 @@ def calc_sma_from_ti(
 
     # global_cov[5:, 5:] are covariances of the
     # Thiele-Innes constants in the order A, B, F, G
-    # TODO Double check if the calculation is correct
+    # TODO Check if the calculation is correct
     # The uncertainty on sma_0 seems a bit small?
 
     sma_0_sigma = np.sqrt(grad_a @ param_cov[5:, 5:] @ grad_a)
@@ -356,7 +358,7 @@ def thiele_innes_to_campbell(
     df_campbell = nss_source.campbell()
 
     if verbose:
-        print("\nConversion to campbell elements:")
+        print("\nConversion to Campbell elements:")
         print(f"   - Period = {model_param[9]:.3f} days")
         print(f"   - Eccentricity = {model_param[10]:.3f}")
         print(f"   - Relative time of periastron = {model_param[11]:.3f}")
@@ -671,3 +673,326 @@ def binary_bias(
     obs_al_bias[mask3] = -mass_ratio / (1.0 + mass_ratio) * delta_eta_rel[mask3]
 
     return obs_al_bias
+
+
+@beartype
+def read_hipparcos_header(file_name: Path) -> dict[str, int | float]:
+    """
+    Read the astrometric solution stored in the header
+    of a Hipparcos-2 IAD file.
+
+    Parameters
+    ----------
+    file_name : Path
+        Hipparcos IAD file.
+
+    Returns
+    -------
+    dict
+        Dictionary with the astrometric solution
+        and fit statistics.
+    """
+
+    with open(file_name, encoding="utf-8") as open_file:
+        lines = open_file.readlines()[:11]
+
+    # --------------------------------------------------------------------------------
+    # Line 7 (first header line, excluding comments/labels in the count)
+    #
+    # The same fields and format as the header in Hip2-DVD Table G.8. Two columns
+    # have been renamed to better match the data they contain: NRES instead of NOB,
+    # F1 instead of NR. Data taken from the (binary) epoch astrometry files
+    # provided with the Java tool.
+    # --------------------------------------------------------------------------------
+    #    Bytes Format Units   Label    Explanations
+    # --------------------------------------------------------------------------------
+    #   3 -  8  I6                 HIP      Hipparcos identifier
+    #  10 - 15  I6                 MCE      Main-catalogue entry (1)
+    #  17 - 19  I3                 NRES     Number of residual records (2)
+    #  22 - 22  I1                 NC       Number of components
+    #  25 - 27  I3                 isol_n   Solution type (3)
+    #  32 - 35  I4                 SCE      Supplement-catalogue entry
+    #  37 - 42  F6.2               F2       Goodness of fit
+    #  44 - 45  I2                 F1       Percentage rejected (4)
+    # --------------------------------------------------------------------------------
+    # Note (1): The MCE field in the Hip2-DVD data internally used an unsigned short
+    # integer, which led to an overrun from index 32767 to -32768 when read with a
+    # signed short. This was corrected here.
+    #
+    # Note (2): NRES corresponds to the number of residual records available for this
+    # source. The residual record file of a given source is therefore always
+    # (13 + NRES) lines long: 13 header lines including comments/labels, plus the
+    # actual residual records.
+    #
+    # Note (3): See van Leeuwen (2007), Section 3.5, for a discussion of the
+    # different solution types.
+    #
+    # Note (4): F1 was stored as an integer in the epoch astrometry headers. That
+    # means the number given is the actual percentage rounded down to the nearest
+    # integer.
+    # --------------------------------------------------------------------------------
+    #
+    #
+    # --------------------------------------------------------------------------------
+    # Line 9 (second header line, excluding comments/labels in the count)
+    #
+    # Contains auxiliary information. Data taken from the main astrometric
+    # catalogue files provided with the Java tool (binary files).
+    # --------------------------------------------------------------------------------
+    #   3 - 9   F7.4   mag         Hp       Hp magnitude, see ESA (1997), Field H44
+    #  11 - 16  F6.3   mag         B-V      B-V colour index, see ESA (1997), Field H37
+    #  18 - 18  I1                 VarAnn   Reference to variability annex,
+    #                                       see ESA (1997), Field H53
+    #  25 - 27  I3                 NOB      Number of observations (1)
+    #  29 - 31  I3                 NR       Number of rejected observations (2)
+    # --------------------------------------------------------------------------------
+    # Note (1): The number of observations processed in the astrometric solution of
+    # this source, including the NR rejected observations. For most sources NOB is
+    # identical to the number of residuals available (first header line, field NRES).
+    # For 6617 sources the two numbers differ. This indicates some data corruption in
+    # the residual records of these sources. See Brandt et al. (2021), Section 4,
+    # for a detailed discussion. These authors also offer an ad-hoc correction to the
+    # residual records for the 6617 sources affected.
+    #
+    # Note (2): The number of observations rejected in the astrometric solution of
+    # this source. These are marked with negative/zero sigma abscissa residuals
+    # (SRES) in the residual records. Note that there are currently 89 sources where
+    # NR does not equal the number of records with negative/zero sigmas. Since the
+    # origin of this issue is not understood, these should be treated with extra care.
+    # --------------------------------------------------------------------------------
+    #
+    #
+    # --------------------------------------------------------------------------------
+    # Line 11 (third header line, excluding comments/labels in the count)
+    #
+    # Contains the reference astrometric parameters, against which the residuals are
+    # expressed, and their corresponding uncertainties. Data taken from the main
+    # astrometric catalogue files provided with the Java tool (binary files).
+    #
+    # All sources list the five main astrometric parameters (and their uncertainties)
+    # first. Sources with 7/9 parameter or VIM solutions additionally list the higher
+    # order terms of their astrometric solution (and the corresponding
+    # uncertainties). Sources with stochastic solutions additionally list the
+    # cosmic dispersion parameter. The solution type is given in the first header
+    # line, field isol_n modulo 10, i.e. by the least significant digit of isol_n.
+    # Additional fields that are not applicable are marked with "---".
+    #
+    # Note: For sources with a 7 parameter, 9 parameter, or VIM solution, the
+    # residuals are relative to the full 7 parameter, 9 parameter, or VIM solutions.
+    # This is in contrast to the original Hipparcos reduction (ESA, 1997), where the
+    # residuals are always defined with respect to the skypath described by only the
+    # first five parameters, regardless of solution type.
+    # --------------------------------------------------------------------------------
+    #   3 - 14  F12.8 deg         RAdeg    Right Ascension
+    #  16 - 27  F12.8 deg         DEdeg    Declination
+    #  29 - 36  F8.2  mas         Plx      Parallax
+    #  38 - 45  F8.2  mas/yr      pmRA     Proper motion in Right Ascension
+    #  47 - 54  F8.2  mas/yr      pmDE     Proper motion in Declination
+    #  56 - 61  F6.2  mas         e_RA     Formal error on RAdeg
+    #  63 - 68  F6.2  mas         e_DE     Formal error on DEdeg
+    #  70 - 75  F6.2  mas         e_Plx    Formal error on Plx
+    #  77 - 82  F6.2  mas/yr      e_pmRA   Formal error on pmRA
+    #  84 - 89  F6.2  mas/yr      e_pmDE   Formal error on pmDE
+    #  91 - 96  F6.2  mas/yr2     dpmRA    Acceleration in Right Ascension (7p, 9p)
+    #  98 - 103 F6.2  mas/yr2     dpmDE    Acceleration in Declination (7p, 9p)
+    # 105 - 110 F6.2  mas/yr2     e_dpmRA  Formal error on dpmRA (7p, 9p)
+    # 114 - 119 F6.2  mas/yr2     e_dpmDE  Formal error on dpmDE (7p, 9p)
+    # 123 - 128 F6.2  mas/yr3     ddpmRA   Acceleration change in Right Ascension (9p)
+    # 131 - 136 F6.2  mas/yr3     ddpmDE   Acceleration change in Declination (9p)
+    # 139 - 144 F6.2  mas/yr3     e_ddpmRA Formal error on ddpmRA (9p)
+    # 149 - 154 F6.2  mas/yr3     e_ddpmDE Formal error on ddpmDE (9p)
+    # 159 - 164 F6.2  mas         upsRA    VIM in Right Ascension (VIM)
+    # 167 - 172 F6.2  mas         upsDE    VIM in Declination (VIM)
+    # 175 - 180 F6.2  mas         e_upsRA  Formal error on upsRA (VIM)
+    # 184 - 189 F6.2  mas         e_upsDE  Formal error on upsDE (VIM)
+    # 193 - 198 F6.2  mas         var      Cosmic dispersion added (stochastic)
+    # --------------------------------------------------------------------------------
+    # Note (7p, 9p): Applicable to 7p and 9p solutions only; isol_n ending in 7 or 9.
+    # "---" for all other solution types.
+    #
+    # Note (9p): Applicable to 9p solutions only; isol_n ending in 9. "---" for all
+    # other solution types.
+    #
+    # Note (VIM): Applicable to VIM solutions only; isol_n ending in 3. "---" for all
+    # other solution types.
+    #
+    # Note (stochastic): Applicable to stochastic solutions only; isol_n ending in 1.
+    # "---" for all other solution types.
+    # --------------------------------------------------------------------------------
+
+    solution_names = lines[5].lstrip("# ").split()
+    solution_values = lines[6].lstrip("# ").split()
+    solution = dict(zip(solution_names, solution_values))
+
+    photometry_names = lines[7].lstrip("# ").split()
+    photometry_values = lines[8].lstrip("# ").split()
+    photometry = dict(zip(photometry_names, photometry_values))
+
+    astrometric_names = lines[9].lstrip("# ").split()
+    astrometric_values = lines[10].lstrip("# ").split()
+    astrometric = dict(zip(astrometric_names, astrometric_values))
+
+    solution_type = int(solution["isol_n"]) % 10
+
+    header_out = {
+        "hip_id": int(solution["HIP"]),
+        "solution_type": solution_type,
+        "f2": float(solution["F2"]),
+        "ra_deg": float(astrometric["RAdeg"]),
+        "dec_deg": float(astrometric["DEdeg"]),
+        "parallax": float(astrometric["Plx"]),
+        "pm_ra": float(astrometric["pm_RA"]),
+        "pm_dec": float(astrometric["pm_DE"]),
+        "ra_error": float(astrometric["e_RA"]),
+        "dec_error": float(astrometric["e_DE"]),
+        "parallax_error": float(astrometric["e_Plx"]),
+        "pm_ra_error": float(astrometric["e_pmRA"]),
+        "pm_dec_error": float(astrometric["e_pmDE"]),
+        "hp_mag": float(photometry["Hp"]),
+    }
+
+    #  63 - 68  F6.2  mas         e_DE     Formal error on DEdeg
+    #  70 - 75  F6.2  mas         e_Plx    Formal error on Plx
+    #  77 - 82  F6.2  mas/yr      e_pmRA   Formal error on pmRA
+    #  84 - 89  F6.2  mas/yr      e_pmDE   Formal error on pmDE
+    #  91 - 96  F6.2  mas/yr2     dpmRA    Acceleration in Right Ascension (7p, 9p)
+    #  98 - 103 F6.2  mas/yr2     dpmDE    Acceleration in Declination (7p, 9p)
+    # 105 - 110 F6.2  mas/yr2     e_dpmRA  Formal error on dpmRA (7p, 9p)
+    # 114 - 119 F6.2  mas/yr2     e_dpmDE  Formal error on dpmDE (7p, 9p)
+    # 123 - 128 F6.2  mas/yr3     ddpmRA   Acceleration change in Right Ascension (9p)
+    # 131 - 136 F6.2  mas/yr3     ddpmDE   Acceleration change in Declination (9p)
+    # 139 - 144 F6.2  mas/yr3     e_ddpmRA Formal error on ddpmRA (9p)
+    # 149 - 154 F6.2  mas/yr3     e_ddpmDE Formal error on ddpmDE (9p)
+    # 159 - 164 F6.2  mas         upsRA    VIM in Right Ascension (VIM)
+    # 167 - 172 F6.2  mas         upsDE    VIM in Declination (VIM)
+    # 175 - 180 F6.2  mas         e_upsRA  Formal error on upsRA (VIM)
+
+    if solution_type == 1:
+        header_out["var"] = float(astrometric["var"])
+
+    else:
+        header_out["var"] = 0.0
+
+    if solution_type in (7, 9):
+        header_out["dpmRA"] = float(astrometric["dpmRA"])
+        header_out["dpmDE"] = float(astrometric["dpmDE"])
+        header_out["e_dpmRA"] = float(astrometric["e_dpmRA"])
+        header_out["e_dpmDE"] = float(astrometric["e_dpmDE"])
+
+        if solution_type == 9:
+            header_out["ddpmRA"] = float(astrometric["ddpmRA"])
+            header_out["ddpmDE"] = float(astrometric["ddpmDE"])
+            header_out["e_ddpmRA"] = float(astrometric["e_ddpmRA"])
+            header_out["e_ddpmDE"] = float(astrometric["e_ddpmDE"])
+
+    return header_out
+
+
+# @beartype
+# def fit_5param(
+#     obs_pos: np.ndarray,
+#     obs_err: np.ndarray,
+#     rel_yr: np.ndarray,
+#     sin_scan_ang: np.ndarray,
+#     cos_scan_ang: np.ndarray,
+#     parallax_factor_al: np.ndarray,
+# ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
+#     """
+#     Fit a 5-parameter astrometric model to 1D along-scan data.
+#
+#     Parameters
+#     ----------
+#     obs_pos : np.ndarray
+#         Along-scan positions (mas).
+#     obs_err : np.ndarray
+#         Along-scan uncertainties (mas).
+#     rel_yr : np.ndarray
+#         Observation times relative to the reference epoch in years.
+#     sin_scan_ang : np.ndarray
+#         Sine of the scan angle.
+#     cos_scan_ang : np.ndarray
+#         Cosine of the scan angle.
+#     parallax_factor_al : np.ndarray
+#         Along-scan parallax factors.
+#
+#     Returns
+#     -------
+#     np.ndarray
+#         Best-fit along-scan model in mas.
+#     np.ndarray
+#         Best-fit parameters, ordered as RA offset (mas),
+#         Dec offset (mas), parallax (mas), RA proper
+#         motion (mas/yr), and Dec proper motion (mas/yr).
+#     np.ndarray
+#         Parameter covariance matrix.
+#     """
+#
+#     # Design matrix for the linear regression
+#     design = np.column_stack(
+#         [
+#             sin_scan_ang,
+#             cos_scan_ang,
+#             parallax_factor_al,
+#             rel_yr * sin_scan_ang,
+#             rel_yr * cos_scan_ang,
+#         ]
+#     )
+#
+#     # Inverse covariance matrix
+#     # Correlated elements are set to zero
+#     inv_cov = np.diag(1.0 / obs_err**2)
+#
+#     # Generalized least-squares normal equations:
+#     # theta = (A^T C^-1 A)^-1 A^T C^-1 y
+#     normal_matrix = design.T @ inv_cov @ design
+#     normal_vector = design.T @ inv_cov @ obs_pos
+#
+#     cho_fac = cho_factor(normal_matrix, lower=True)
+#
+#     best_param = cho_solve(cho_fac, normal_vector)
+#     best_model = design @ best_param
+#
+#     param_cov = cho_solve(
+#         cho_fac,
+#         np.eye(design.shape[1]),
+#     )
+#
+#     return best_model, best_param, param_cov
+
+
+@beartype
+def print_section(
+    title: str,
+    bound_char: str = "-",
+    extra_line: bool = True,
+    upper_bound: bool = True,
+) -> None:
+    """
+    Print a formatted section heading.
+
+    Parameters
+    ----------
+    title : str
+        Section title.
+    bound_char : str
+        Character used to draw the horizontal boundaries.
+    extra_line : bool
+        Print an empty line before the section heading.
+    upper_bound : bool
+        Whether to print the upper boundary.
+    """
+
+    if len(bound_char) != 1:
+        raise ValueError("'bound_char' should be a single character.")
+
+    boundary = bound_char * len(title)
+
+    if extra_line:
+        print()
+
+    if upper_bound:
+        print(boundary)
+
+    print(title)
+    print(boundary)
+    print()

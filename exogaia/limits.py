@@ -13,12 +13,12 @@ from scipy.ndimage import gaussian_filter
 
 from tqdm.auto import tqdm
 
-from exogaia.core import ExoGaia
-from exogaia.data import EpochAstrometry
+from exogaia.data import GaiaAstrometry
 from exogaia.leastsq import LeastSquares
+from exogaia.utils import print_section
 
 
-class CompletenessMap(ExoGaia):
+class CompletenessMap:
     """
     Class for computing a completeness map of detecting a
     proper motion acceleration as function of planetary
@@ -30,7 +30,7 @@ class CompletenessMap(ExoGaia):
         self,
         source_id: typing.Union[int, str],
         primary_mass: typing.Tuple[Real, Real],
-        gaia_release: str = "DR4",
+        gaia_release: typing.Literal["DR1", "DR2", "DR3", "DR4", "DR5"] = "DR4",
     ) -> None:
         """
         Parameters
@@ -53,13 +53,13 @@ class CompletenessMap(ExoGaia):
         self.primary_mass = primary_mass
         self.gaia_release = gaia_release
 
-        self.epoch_astrom = EpochAstrometry(
+        self.epoch_astrom = GaiaAstrometry(
             primary_mass=self.primary_mass,
             gaia_release=self.gaia_release,
             verbose=False,
         )
 
-        self.print_section("Completeness map")
+        print_section("Completeness map", bound_char="=")
 
         print(f"Gaia ID = {self.source_id}")
         print(f"Gaia release = {self.gaia_release}")
@@ -72,7 +72,11 @@ class CompletenessMap(ExoGaia):
     @beartype
     def calc_completeness(
         self,
-        det_type: str = "accel_7param",
+        det_type: typing.Literal[
+            "accel_7param",
+            "accel_9param",
+            "orbit",
+        ] = "accel_7param",
         n_sigma: Real = 3.0,
         n_samples: int = 30,
         mass_points: typing.Optional[np.ndarray] = None,
@@ -81,69 +85,72 @@ class CompletenessMap(ExoGaia):
         plot_file: typing.Optional[str] = None,
     ) -> Figure:
         """
-        Compute and plot a completeness map. This method
-        estimates the detection completeness by sampling
-        random orbits for a grid of companion masses and
-        semi-major axes. Either a 7-parameter
-        acceleration, 9-parameter acceleration, or full
-        orbit model is fit, and the fraction of
-        realizations with a detection significance larger
-        than ``n_sigma`` is adopted as the completeness.
+        Compute and plot a detection completeness map.
+
+        The detection completeness is estimated by sampling random
+        orbits on a grid of companion masses and semi-major axes.
+        For each grid point, ``n_samples`` realizations are generated
+        and fit with either a 7-parameter acceleration model, a
+        9-parameter acceleration model, or a full orbital model.
+        Completeness is defined as the fraction of realizations that
+        satisfy the selected detection criterion.
 
         Parameters
         ----------
         det_type : str
-            Detection type: 'accel_7param', 'accel_9param',
-            or 'orbit', for respectively using the precision
-            on the acceleration, jerk, and orbital period, to
-            determine if a simulated source is detected
-            with a significance of ``n_sigma``.
+            Detection type. Supported values are ``"accel_7param"``,
+            ``"accel_9param"``, and ``"orbit"``. Acceleration and jerk
+            detections are based on the significance of their two-dimensional
+            vectors using the full covariance matrix. Orbital detections are
+            based on the fitted orbital period and its uncertainty.
         n_sigma : float, optional
-            Detection threshold in units of acceleration
-            signal-to-noise (default: 5.0).
+            Detection significance threshold (default: 3.0).
         n_samples : int
-            Number of Monte Carlo realizations per grid
-            point (default: 30).
+            Number of Monte Carlo realizations per grid point
+            (default: 30).
         mass_points : np.ndarray, None
-            Grid of companion masses (Msun). If ``None``, a
-            linear grid between 0.001 and 0.1 Msun is used.
+            Grid of companion masses (Msun). If ``None``, a logarithmic
+            grid between 0.001 and 0.1 Msun is used.
         sma_points : np.ndarray, None
-            Grid of semi-major axes (au). If ``None``, a
-            logarithmic grid between 0.1 and 100 au is used.
+            Grid of semi-major axes (au). If ``None``, a logarithmic
+            grid between 0.1 and 100 au is used.
         filter_sigma : float, None
-            Width of the optional Gaussian filter that is applied
-            to smooth away the Monte Carlo sampling noise. The
-            width is in number of grid points, so a value of 1.0
-            works usually well if for example the number of grid
-            points is 50 in both the mass and semi-major axis
-            dimension. No filter is applied if the argument is
-            set to ``None``.
+            Width of an optional Gaussian filter used to reduce Monte
+            Carlo sampling noise. The width is specified in grid points.
+            No filter is applied if ``None``.
         plot_file : str, None
-            If provided, the completeness map is saved to this
-            file. If ``None``, the plot is shown interactively.
+            File path for saving the completeness map. If ``None``,
+            the plot is shown interactively.
 
         Returns
         -------
         Figure
-            The Matplotlib ``Figure`` object that can be used
-            for further adjustments of the plot.
+            Matplotlib ``Figure`` object containing the completeness map.
 
         Notes
         -----
-        - Completeness is defined as the fraction of simulations
-          for which the total acceleration amplitude satisfies:
+        For ``det_type="accel_7param"``, the acceleration significance is
 
-              accel / sigma_accel > n_sigma
+            sqrt(a.T @ C_a^-1 @ a),
 
-        - The resulting map shows completeness (%) as a function
-          of companion mass (Msun) and semi-major axis (au).
+        where ``a`` is the two-dimensional acceleration vector and ``C_a``
+        is its covariance matrix. The same criterion is applied to the jerk
+        vector for ``det_type="accel_9param"``.
+
+        For ``det_type="orbit"``, a realization is currently considered
+        detected when
+
+            period / sigma_period > n_sigma.
+
+        The resulting map gives the detection completeness as a function
+        of companion mass and semi-major axis.
         """
 
-        self.print_section("Calculate completeness")
+        print_section("Calculate completeness")
 
         if mass_points is None:
             # Grid points for companion mass (Msun)
-            mass_points = np.linspace(0.001, 0.1, 50)
+            mass_points = np.logspace(-3, -1, 50)
 
         if sma_points is None:
             # Grid points for semi-major axis (au)
@@ -152,6 +159,8 @@ class CompletenessMap(ExoGaia):
         compl_map = np.zeros((mass_points.size, sma_points.size))
 
         pbar = tqdm(total=mass_points.size * sma_points.size)
+
+        n_detect = 0
 
         for mass2_idx, mass2_item in enumerate(mass_points):
             for sma_idx, sma_item in enumerate(sma_points):
@@ -179,10 +188,17 @@ class CompletenessMap(ExoGaia):
                         cov_accel = least_sq.param_cov[5:7, 5:7]
 
                         # Uncertainty on the total acceleration
-                        sigma_accel = np.sqrt(grad_accel @ cov_accel @ grad_accel)
+                        # sigma_accel = np.sqrt(grad_accel @ cov_accel @ grad_accel)
 
-                        if accel / sigma_accel > n_sigma:
-                            compl_map[mass2_idx, sma_idx] += 1.0 / float(n_samples)
+                        # Significance of the 2D acceleration vector
+                        # using its full covariance matrix
+                        snr_accel = np.sqrt(
+                            accel_components
+                            @ np.linalg.solve(cov_accel, accel_components)
+                        )
+
+                        if snr_accel > n_sigma:
+                            n_detect += 1
 
                     elif det_type == "accel_9param":
                         least_sq.accel_9param(plot_file=None, verbose=False)
@@ -200,12 +216,18 @@ class CompletenessMap(ExoGaia):
 
                         # Propagate the component uncertainties and covariance into the
                         # uncertainty on the total jerk.
-                        sigma_jerk = np.sqrt(grad_jerk @ cov_jerk @ grad_jerk)
+                        # sigma_jerk = np.sqrt(grad_jerk @ cov_jerk @ grad_jerk)
 
-                        if sigma_jerk > 0.0 and jerk / sigma_jerk > n_sigma:
-                            compl_map[mass2_idx, sma_idx] += 1.0 / float(n_samples)
+                        # Significance of the 2D jerk vector
+                        # using its full covariance matrix
+                        snr_jerk = np.sqrt(
+                            jerk_components @ np.linalg.solve(cov_jerk, jerk_components)
+                        )
 
-                    elif det_type == "orbit":
+                        if snr_jerk > n_sigma:
+                            n_detect += 1
+
+                    else:
                         least_sq.orbit_grid(
                             n_points=20,
                             map_type="chi2_det",
@@ -222,14 +244,9 @@ class CompletenessMap(ExoGaia):
                             sigma_period = np.sqrt(np.diag(least_sq.param_cov))[9]
 
                             if period / sigma_period > n_sigma:
-                                compl_map[mass2_idx, sma_idx] += 1.0 / float(n_samples)
+                                n_detect += 1
 
-                    else:
-                        raise ValueError(
-                            f"Setting 'det_type'='{det_type}' is not valid. "
-                            "Please set the argument of 'det_type' to "
-                            "'accel_7param', 'accel_9param', or 'orbit'."
-                        )
+                compl_map[mass2_idx, sma_idx] = float(n_detect) / float(n_samples)
 
                 pbar.update(1)
 
@@ -249,7 +266,11 @@ class CompletenessMap(ExoGaia):
         ax.set_xlabel("Semi-major axis (au)", fontsize=12)
         ax.set_ylabel(r"Companion mass ($M_\odot$)", fontsize=12)
         ax.set_xscale("log")
-        ax.set_title(rf"${n_sigma}\sigma$ completeness ({det_type})", fontsize=10.0)
+        ax.set_yscale("log")
+        ax.set_title(
+            rf"{self.gaia_release} ${n_sigma}\sigma$ completeness ({det_type})",
+            fontsize=10.0,
+        )
 
         if plot_file is None:
             plt.show()

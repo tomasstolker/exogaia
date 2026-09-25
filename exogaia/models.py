@@ -10,17 +10,16 @@ import numpy as np
 
 from astropy import constants as c
 from astropy import units as u
-from astropy.coordinates import get_body_barycentric
+from astropy.coordinates import get_body_barycentric, SkyCoord
 from astropy.coordinates.representation.cartesian import CartesianRepresentation
 from astropy.time import Time
 from beartype import beartype, typing
 from matplotlib.figure import Figure
 
-from exogaia.core import ExoGaia
-from exogaia.utils import param_dict_to_list
+from exogaia.utils import param_dict_to_list, print_section
 
 
-class StarModel(ExoGaia):
+class StarModel:
     """
     Class with an astrometric model of a stellar track.
     """
@@ -41,47 +40,74 @@ class StarModel(ExoGaia):
             None
         """
 
+        self.epoch_astrometry = epoch_astrometry
         self.data_table = epoch_astrometry.data_table
         self.ref_epoch = epoch_astrometry.ref_epoch
-        self.ra = epoch_astrometry.ra
-        self.dec = epoch_astrometry.dec
+        self.ra_ref = epoch_astrometry.ra_ref
+        self.dec_ref = epoch_astrometry.dec_ref
         self.verbose = verbose
+
+        if self.verbose:
+            print_section("Star model", bound_char="=")
+            print(f"Epoch astrometry: {self.epoch_astrometry.__class__.__name__}")
 
     @beartype
     def barycentric_position(
-        self, obs_time: typing.Optional[np.ndarray] = None
+        self,
+        sat_loc: typing.Literal["Earth", "L2"],
+        obs_time: typing.Optional[np.ndarray] = None,
     ) -> CartesianRepresentation:
         """
-        Method for calculating the Cartesian position of the Gaia
-        satellite relative to the barycenter of the Solar System.
+        Calculate the barycentric position of an observer.
+
+        The observer can be placed either at the geocenter or at the
+        approximate Sun-Earth L2 point. The L2 position is calculated
+        along the Sun-Earth direction using the leading-order restricted
+        three-body approximation. The Lissajous orbit of Gaia around L2
+        is not included.
 
         Parameters
         ----------
-        obs_time : np.ndarray, None
-            Array with the observing epochs in Julian years
-            on the TCB scale. The epochs are selected from
-            the ``EpochAstrometry`` if the argument is set
-            to ``None``.
+        sat_loc : str
+            Observer location. Supported values are ``"L2"`` and
+            ``"Earth"``.
+        obs_time : np.ndarray, optional
+            Observing epochs expressed as Julian years on the TCB
+            scale. If ``None``, the epochs are read from
+            ``self.data_table["obs_time_tcb"]``.
 
         Returns
         -------
         CartesianRepresentation
-            Cartesian coordinates of the Gaia satellite at ``obs_time``.
+            Barycentric ICRS Cartesian coordinates of the observer
+            at ``obs_time``.
         """
 
         if obs_time is None:
             obs_time = self.data_table["obs_time_tcb"].to_numpy()
 
-        time = Time(obs_time, format="jyear", scale="tcb")
+        time_tcb = Time(obs_time, format="jyear", scale="tcb")
 
-        bar_pos = get_body_barycentric(body="earth", time=time, ephemeris=None)
+        earth_pos = get_body_barycentric(body="earth", time=time_tcb)
 
-        # Gaia orbits at Lagrangian L2 of the Earth-Sun-Moon system
-        # https://en.wikipedia.org/wiki/Lagrange_point#L2
+        if sat_loc == "L2":
+            # sat_loc = "L2"
+            sun_pos = get_body_barycentric(body="sun", time=time_tcb)
 
-        mu = c.M_earth.value / (c.M_sun.value + c.M_earth.value)
+            # Vector from the Sun to Earth
+            sun_earth = earth_pos - sun_pos
+            sun_earth_dist = sun_earth.norm()
+            sun_earth_unit = sun_earth / sun_earth_dist
 
-        return bar_pos + bar_pos * (mu / 3) ** (1 / 3)
+            # Leading-order distance from Earth to the Sun-Earth L2 point
+            mu = (c.M_earth / (c.M_sun + c.M_earth)).decompose().value
+
+            l2_dist = sun_earth_dist * (mu / 3.0) ** (1.0 / 3.0)
+
+            return earth_pos + l2_dist * sun_earth_unit
+
+        # sat_loc = "Earth"
+        return earth_pos
 
     @beartype
     def calc_2d_model(
@@ -93,10 +119,10 @@ class StarModel(ExoGaia):
         Method for calculating the stellar track, returning separately
         the RA and Dec components. This function calculates the motion
         due to parallax, which might be less precise than using the
-        parallax factors provided by Gaia, but these are not provided
-        for RA and Dec separately. Typically these are not needed,
-        but for creating a 2D plot of the stellar track, we need
-        to calculate the effect in RA and Dec separately.
+        parallax factors, but these are not provided for RA and Dec
+        separately. Typically these are not needed, but for creating
+        a 2D plot of the stellar track, we need to calculate the
+        effect in RA and Dec separately.
 
         Parameters
         ----------
@@ -130,7 +156,7 @@ class StarModel(ExoGaia):
         """
 
         if self.verbose:
-            self.print_section("Calculate stellar track")
+            print_section("Calculate stellar track")
 
         if self.verbose:
             print("Stellar parameters:")
@@ -153,15 +179,27 @@ class StarModel(ExoGaia):
 
         # RA and Dec coordinates
 
-        ra_coord = self.ra + model_param["ra_offset"]
-        dec_coord = self.dec + model_param["dec_offset"]
+        ra_coord = self.ra_ref + model_param["ra_offset"]
+        dec_coord = self.dec_ref + model_param["dec_offset"]
 
-        # Position of Gaia relative to the Solar System
-        # barycenter at each observation time
+        # Position of the satellite relative to the Solar System
+        # barycenter at each observation time.
         # TODO See Wright & Howard (2009)
 
-        gaia_pos = self.barycentric_position(obs_time)
-        gaia_pos = gaia_pos.xyz.to_value()
+        data_type = self.epoch_astrometry.__class__.__name__
+
+        if data_type == "GaiaAstrometry":
+            sat_pos = self.barycentric_position("L2", obs_time)
+
+        elif data_type == "HipparcosAstrometry":
+            sat_pos = self.barycentric_position("Earth", obs_time)
+
+        else:
+            raise ValueError(
+                f"The data type of epoch astrometry is not supported: {data_type}"
+            )
+
+        sat_pos = sat_pos.xyz.to_value()
 
         # Tangent plane unit vectors on the sky
         # Local directions of increasing RA and Dec
@@ -184,7 +222,7 @@ class StarModel(ExoGaia):
         design_ra = np.column_stack(
             [
                 np.full(obs_time.size, 1.0),
-                -(alpha_hat @ gaia_pos),
+                -(alpha_hat @ sat_pos),
                 rel_year,
             ]
         )
@@ -192,7 +230,7 @@ class StarModel(ExoGaia):
         design_dec = np.column_stack(
             [
                 np.full(obs_time.size, 1.0),
-                -(delta_hat @ gaia_pos),
+                -(delta_hat @ sat_pos),
                 rel_year,
             ]
         )
@@ -279,9 +317,9 @@ class StarModel(ExoGaia):
             (mas/yr^2). In that case, also the derivative on the
             acceleration, ``pm_dotdot_ra`` (mas/yr^3) and
         calc_parallax : bool
-            Calculate the parallax effect or adopt the parallax
-            factors from Gaia (default: False). The latter will
-            be slightly more accurate. This parameter was mainly
+            Calculate the parallax effect or use the parallax
+            factors from Gaia/Hipparcos (default: False). The latter
+            will be somewhat more accurate. This parameter was mainly
             included for testing purposes.
 
         Returns
@@ -291,7 +329,7 @@ class StarModel(ExoGaia):
         """
 
         if self.verbose:
-            self.print_section("Calculate stellar track")
+            print_section("Calculate stellar track")
 
         param_list = param_dict_to_list(model_param)
 
@@ -312,8 +350,7 @@ class StarModel(ExoGaia):
 
         if calc_parallax:
             # This function calculates the effect from the parallax,
-            # with a more simplistic approach than the 1D parallax
-            # factor provided with the Gaia epoch astrometry.
+            # but ignores higher order effects.
 
             _, _, delta_pos = self.calc_2d_model(model_param, obs_time=None)
 
@@ -363,7 +400,7 @@ class StarModel(ExoGaia):
         return delta_pos
 
 
-class KeplerModel(ExoGaia):
+class KeplerModel:
     """
     Class with a Kepler model for simulating 1D
     and 2D astrometry.
@@ -393,6 +430,10 @@ class KeplerModel(ExoGaia):
         self.data_table = epoch_astrometry.data_table
         self.ref_epoch = self.epoch_astrometry.ref_epoch
         self.verbose = verbose
+
+        if self.verbose:
+            print_section("Kepler model", bound_char="=")
+            print(f"Epoch astrometry: {self.epoch_astrometry.__class__.__name__}")
 
     @beartype
     def solve_kepler(
@@ -545,7 +586,7 @@ class KeplerModel(ExoGaia):
         """
 
         if self.verbose:
-            self.print_section("Calculate orbit model")
+            print_section("Calculate orbit model")
 
         if self.verbose:
             print("Orbit parameters:")
@@ -579,7 +620,10 @@ class KeplerModel(ExoGaia):
         # so should be scaled by the semi-major axis
 
         x_orb, y_orb = self.solve_kepler(
-            model_param["per"], model_param["ecc"], model_param["tau"], obs_time
+            model_param["per"],
+            model_param["ecc"],
+            model_param["tau"],
+            obs_time,
         )
 
         # Rotate (x_orb, y_orb) into sky plane (x_sky, y_sky)
@@ -738,7 +782,7 @@ class KeplerModel(ExoGaia):
         # 1D stellar track from linear projection on design matrix
 
         if self.verbose:
-            self.print_section("Calculate stellar track")
+            print_section("Calculate stellar track")
 
         param_list = param_dict_to_list(model_param)
 
@@ -772,7 +816,7 @@ class KeplerModel(ExoGaia):
     ) -> np.ndarray:
         """
         Calculate the residuals of the 1D model astrometry
-        with respect to the Gaia epoch astrometry.
+        with respect to the observed epoch astrometry.
 
         Parameters
         ----------
@@ -803,7 +847,11 @@ class KeplerModel(ExoGaia):
         residuals = obs_pos - self.calc_1d_model(model_param)
 
         if self.verbose:
-            self.print_section("Calculate residuals")
+            print_section("Calculate residuals")
+
+            print(f"Residual range: {residuals.min():.3f} to {residuals.max():.3f} mas")
+            print(f"Residual RMS: {np.sqrt(np.mean(residuals**2)):.3f} mas")
+            print(f"Normalized RMS: {np.sqrt(np.mean((residuals / obs_err) ** 2)):.3f}")
 
         # Number of data points
         n_obs = len(obs_pos)
@@ -812,7 +860,7 @@ class KeplerModel(ExoGaia):
         n_param = len(model_param)
 
         if self.verbose:
-            print(f"Number of epochs = {n_obs}")
+            print(f"\nNumber of epochs = {n_obs}")
             print(f"Number of parameters = {n_param}")
 
         # Number of degrees of freedom
@@ -893,7 +941,8 @@ class KeplerModel(ExoGaia):
         # Position at time of periastron (in Julian years)
 
         t_per = (
-            self.ref_epoch.value + (model_param["per"] * model_param["tau"]) / 365.25
+            self.ref_epoch.tcb.jyear
+            + (model_param["per"] * model_param["tau"]) / 365.25
         )
 
         delta_ra_per, delta_dec_per = self.calc_orbit(
@@ -910,7 +959,7 @@ class KeplerModel(ExoGaia):
             obs_time=np.array([t_per + 0.5 * period_years]),
         )
 
-        # Orbit model at Gaia epochs
+        # Orbit model at observation epochs
 
         delta_ra, delta_dec = self.calc_orbit(
             model_param,
@@ -1041,7 +1090,7 @@ class KeplerModel(ExoGaia):
             plt.savefig(plot_file)
 
         if self.verbose:
-            self.print_section("Plot orbit")
+            print_section("Plot orbit")
 
             print(f"Output file: {plot_file}")
 
