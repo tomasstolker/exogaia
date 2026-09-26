@@ -3,11 +3,6 @@
 Frequently Asked Questions
 ==========================
 
-How do I install the package?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Please contact Tomas Stolker (stolker@strw.leidenuniv.nl), who will give access to the (private) Github repository. The version on `PyPI <https://pypi.org/project/exogaia/>`_ is not useful and only created to reserve the name.
-
 What dependency versions should I use?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -18,3 +13,20 @@ For example, in your local folder where you may have cloned the repository:
 .. code-block:: bash
 
    pip install --upgrade -e .
+
+How do I run my code on multiple CPUs?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The orbit inference with ``NestedSampler`` supports multiprocessing.
+
+First, make sure to install ``mpi4py``:
+
+.. code-block:: bash
+
+   pip install mpi4py
+
+Then, to execute you ``exogaia`` script with MPI, for example using 8 CPUs:
+
+.. code-block:: bash
+
+   mpirun -n 8 python run_exogaia.py

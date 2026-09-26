@@ -10,7 +10,8 @@ import pandas as pd
 
 from beartype import beartype, typing
 from nsstools import NssSource
-from scipy.linalg import cho_factor, cho_solve
+
+# from scipy.linalg import cho_factor, cho_solve
 from scipy.optimize import brentq
 
 # @beartype
@@ -90,7 +91,7 @@ from scipy.optimize import brentq
 def calc_sma_from_ti(
     model_param: np.ndarray,
     param_cov: np.ndarray,
-) -> typing.Tuple[Real, Real, Real, Real, Real]:
+) -> typing.Tuple[Real, Real]:
     """
     Compute the photocenter semi-major axis and derived orbital quantities
     from Thiele–Innes constants.
@@ -181,7 +182,7 @@ def calc_sma_from_ti(
     # TODO Check if the calculation is correct
     # The uncertainty on sma_0 seems a bit small?
 
-    sma_0_sigma = np.sqrt(grad_a @ param_cov[5:, 5:] @ grad_a)
+    sma_0_sigma = np.sqrt(grad_a @ param_cov[5:9, 5:9] @ grad_a)
 
     return sma_0, sma_0_sigma
 
@@ -222,7 +223,19 @@ def calc_mass_from_sma(
         Companion mass (Msun).
     """
 
-    # Calculate mass function (Msun)
+    if sma_0 < 0.0:
+        raise ValueError("'sma_0' should be nonnegative")
+
+    if period <= 0.0:
+        raise ValueError("'period' should be positive")
+
+    if parallax <= 0.0:
+        raise ValueError("'parallax' should be positive")
+
+    if primary_mass <= 0.0:
+        raise ValueError("'primary_mass' should be positive")
+
+    # Astrometric mass function (Msun), assuming negligible companion flux
     # See Eq. 1 in Halbwachs et al. (2023)
 
     f_mass = (sma_0 / parallax) ** 3 / (period / 365.25) ** 2
@@ -290,8 +303,8 @@ def thiele_innes_to_campbell(
     model_param : np.ndarray
         Array containing the astrometric and orbital parameters.
         The expected ordering is
-        - ``model_param[0]`` : right ascension (deg)
-        - ``model_param[1]`` : declination (deg)
+        - ``model_param[0]`` : RA offset (deg)
+        - ``model_param[1]`` : Dec offset (deg)
         - ``model_param[2]`` : parallax (mas)
         - ``model_param[3]`` : proper motion in RA (mas yr⁻¹)
         - ``model_param[4]`` : proper motion in Dec (mas yr⁻¹)
@@ -457,7 +470,7 @@ def param_list_to_dict(
 
     Parameters
     ----------
-    param_list : dict
+    param_list : list(float), np.ndarray
         List with 5, 7, 9, or 12 model parameters, in the
         required internal order.
 
@@ -499,64 +512,60 @@ def param_list_to_dict(
 @beartype
 def binary_bias(
     delta_eta_rel: np.ndarray,
-    mass_ratio: float,
-    flux_ratio: float,
+    mass_ratio: Real,
+    flux_ratio: Real,
     verbose: bool,
 ) -> np.ndarray:
     """
-    Compute the along-scan (AL) observation bias caused by binarity.
+    Compute the along-scan astrometric bias caused by binarity.
 
-    The AL bias is defined as the difference between the measured
-    AL position (as obtained in IPD) and the AL position of the
-    mass centre of the binary.
-
-    The details are provided in Section 2.4 of "Expected
-    astrometric properties of binaries in Gaia (E)DR3" by
-    L. Lindegren at `ESA's Gaia public documents
-    <https://www.cosmos.esa.int/web/gaia/public-dpac-documents>`_.
-
-    Let
-
-    - ρ : angular separation of the binary
-    - θ : binary position angle
-    - ψ : scan position angle
-    - q : mass ratio (q = M₂ / M₁)
-    - f : flux ratio (f = F₂ / F₁)
-    - Δη : projected AL separation = ρ cos(ψ − θ)
-
-    The bias depends primarily on Δη, the flux ratio f, and
-    the mass ratio q.
-
-    Following the model of L. Lindegren, three regimes are
-    distinguished depending on the projected separation
-    relative to the Gaia resolution unit, u = 90 mas.
-
-    The bias δη is computed as:
-
-    1. :math:`|\\Delta \\eta / u| \\leq 0.1` (unresolved regime),
-    :math:`\\delta \\eta = \\left( \\frac{f}{1+f} - \\frac{q}{1+q} \\right)\\Delta \\eta`
-
-    2. :math:`0.1 < |\\Delta \\eta / u| \\leq 3 - f` (partially resolved regime),
-    :math:`\\delta \\eta = u\\, B(f, \\Delta \\eta / u) - \\frac{q}{1+q}\\Delta \\eta`
-
-    3. :math:`|\\Delta \\eta / u| > 3 - f` (resolved regime),
-    :math:`\\delta \\eta = - \\frac{q}{1+q}\\Delta \\eta`
-
-    where :math:`B(f, p)` is the dimensionless centroid bias function
-    defined in Appendix E of the document by L. Lindegren.
+    The along-scan bias is defined as the difference between the measured
+    along-scan position and the position of the binary mass center. The
+    calculation follows the approximation described by L. Lindegren for
+    Gaia observations and distinguishes unresolved, marginally resolved,
+    and resolved binary configurations.
 
     Parameters
     ----------
-    delta_eta : np.ndarray
-        Projected AL separation Δη (in mas).
+    delta_eta_rel : np.ndarray
+        Projected along-scan separation between the two components (mas).
+    mass_ratio : float
+        Binary mass ratio, defined as M2 / M1.
+    flux_ratio : float
+        Binary flux ratio, defined as F2 / F1.
+    verbose : bool
+        Print information about the number of observations in each
+        resolution regime.
 
     Returns
     -------
     np.ndarray
-        Along-scan observation bias δη (in mas), which is
-        the displacement of the measured AL position
-        relative to the binary mass centre.
+        Along-scan astrometric bias (mas) relative to the binary
+        mass center.
+
+    Notes
+    -----
+    The calculation uses a Gaia along-scan resolution unit of 90 mas and
+    distinguishes three regimes based on the projected separation:
+
+    1. Unresolved:
+       ``abs(delta_eta_rel / 90) <= 0.1``
+
+    2. Marginally resolved:
+       ``0.1 < abs(delta_eta_rel / 90) <= 3 - flux_ratio``
+
+    3. Resolved:
+       ``abs(delta_eta_rel / 90) > 3 - flux_ratio``
+
+    The marginally resolved regime uses the centroid-bias function
+    described by Lindegren.
     """
+
+    if mass_ratio < 0.0:
+        raise ValueError("'mass_ratio' should be nonnegative")
+
+    if not 0.0 <= flux_ratio <= 1.0:
+        raise ValueError("'flux_ratio' should be between 0 and 1")
 
     # Gaia angular resolution (mas)
 
@@ -629,11 +638,11 @@ def binary_bias(
             )
 
             if abs(b_next - b) < abs_tol:
-                break
+                return b_next
 
             b = b_next
 
-        return b_next
+        raise RuntimeError("Centroid-bias iteration did not converge")
 
     if verbose:
         print("\nApplying AL bias from binarity:")
@@ -694,7 +703,15 @@ def read_hipparcos_header(file_name: Path) -> dict[str, int | float]:
     """
 
     with open(file_name, encoding="utf-8") as open_file:
-        lines = open_file.readlines()[:11]
+        lines = open_file.readlines()
+
+        if len(lines) < 11:
+            raise ValueError(
+                f"Hipparcos IAD header in '{file_name}' "
+                f"contains only {len(lines)} lines."
+            )
+
+        lines = lines[:11]
 
     # --------------------------------------------------------------------------------
     # Line 7 (first header line, excluding comments/labels in the count)
@@ -850,22 +867,6 @@ def read_hipparcos_header(file_name: Path) -> dict[str, int | float]:
         "pm_dec_error": float(astrometric["e_pmDE"]),
         "hp_mag": float(photometry["Hp"]),
     }
-
-    #  63 - 68  F6.2  mas         e_DE     Formal error on DEdeg
-    #  70 - 75  F6.2  mas         e_Plx    Formal error on Plx
-    #  77 - 82  F6.2  mas/yr      e_pmRA   Formal error on pmRA
-    #  84 - 89  F6.2  mas/yr      e_pmDE   Formal error on pmDE
-    #  91 - 96  F6.2  mas/yr2     dpmRA    Acceleration in Right Ascension (7p, 9p)
-    #  98 - 103 F6.2  mas/yr2     dpmDE    Acceleration in Declination (7p, 9p)
-    # 105 - 110 F6.2  mas/yr2     e_dpmRA  Formal error on dpmRA (7p, 9p)
-    # 114 - 119 F6.2  mas/yr2     e_dpmDE  Formal error on dpmDE (7p, 9p)
-    # 123 - 128 F6.2  mas/yr3     ddpmRA   Acceleration change in Right Ascension (9p)
-    # 131 - 136 F6.2  mas/yr3     ddpmDE   Acceleration change in Declination (9p)
-    # 139 - 144 F6.2  mas/yr3     e_ddpmRA Formal error on ddpmRA (9p)
-    # 149 - 154 F6.2  mas/yr3     e_ddpmDE Formal error on ddpmDE (9p)
-    # 159 - 164 F6.2  mas         upsRA    VIM in Right Ascension (VIM)
-    # 167 - 172 F6.2  mas         upsDE    VIM in Declination (VIM)
-    # 175 - 180 F6.2  mas         e_upsRA  Formal error on upsRA (VIM)
 
     if solution_type == 1:
         header_out["var"] = float(astrometric["var"])

@@ -65,13 +65,13 @@ class EpochAstrometry(ABC):
         self.time_start: typing.Optional[Time] = None
         self.time_end: typing.Optional[Time] = None
         self.sim_data: bool = False
-        self.u0_norm: typing.Optional[float] = None
+        self.u0_norm: typing.Optional[Real] = None
 
-        self.ra_ref: typing.Optional[Time] = None
-        self.dec_ref: typing.Optional[Time] = None
-        self.parallax: typing.Optional[Time] = None
-        self.pm_ra: typing.Optional[Time] = None
-        self.pm_dec: typing.Optional[Time] = None
+        self.ra_ref: typing.Optional[Real] = None
+        self.dec_ref: typing.Optional[Real] = None
+        self.parallax: typing.Optional[Real] = None
+        self.pm_ra: typing.Optional[Real] = None
+        self.pm_dec: typing.Optional[Real] = None
 
     def __repr__(self) -> str:
         """
@@ -185,7 +185,7 @@ class GaiaAstrometry(EpochAstrometry):
             self.time_end = Time("2025-01-15 00:00:00", scale="utc")
 
         else:
-            raise ValueError("The Gaia release {self.gaia_release} is not supported.")
+            raise ValueError(f"The Gaia release {self.gaia_release} is not supported.")
 
         if self.verbose:
             print(f"Gaia release: {self.gaia_release}")
@@ -301,7 +301,7 @@ class GaiaAstrometry(EpochAstrometry):
         csv_out: typing.Optional[str] = None,
         reject_fraction: typing.Optional[Real] = None,
         seed: typing.Optional[int] = None,
-        allow_reject: bool = True,
+        require_planet: bool = False,
     ) -> typing.Dict[str, Real]:
         """
         Simulate the epoch astrometry for a single star or binary
@@ -322,10 +322,10 @@ class GaiaAstrometry(EpochAstrometry):
             :func:`~exogaia.data.EpochAstrometry.query_source`
             has already been used to retrieve these values:
 
-                - 'ra' : float
+                - 'ra_ref' : float
                     Right ascension at the reference epoch
                     ``ref_epoch`` of the Gaia release (deg).
-                - 'dec' : float
+                - 'dec_ref' : float
                     Declination at the reference epoch
                     ``ref_epoch`` of the Gaia release (deg).
                 - 'parallax' : float
@@ -402,7 +402,7 @@ class GaiaAstrometry(EpochAstrometry):
             ``OccurrenceRate`` object, which also allows
             for a manually provided occurrence rate
             function. The arguments of ``mass_2`` and
-            ``sma_rel`` will be ignored if the argument
+            ``sma`` will be ignored if the argument
             of ``occ_rate`` is not set to ``None``.
         sigma_per_ccd : float, None
             The AL uncertainty per CCD (mas). Setting the
@@ -419,11 +419,13 @@ class GaiaAstrometry(EpochAstrometry):
             Seed for the random number generator. Random seed is
             used if set to ``None``. Set the argument to a
             positive integer for reproducibility.
-        allow_reject : bool
-            If ``True`` (default) and ``occ_rate`` is not ``None``,
-            each star hosts a planet with probability equal to its
-            integrated occurrence rate. If ``False``, every star
-            is forced to host exactly one planet.
+        require_planet : bool
+            If ``False`` (default), the number of planets per
+            star is drawn from the full Poisson distribution
+            and can therefore be zero. If ``True``, the number
+            of planets is drawn from the corresponding
+            zero-truncated Poisson distribution, so every star
+            hosts at least one planet.
 
         Returns
         -------
@@ -441,9 +443,13 @@ class GaiaAstrometry(EpochAstrometry):
         self.sim_data = True
 
         # Create empty model_param dictionary if needed
+        # Or copy the dictionary to not adjust the
+        # input dictionary itself
 
         if model_param is None:
             model_param = {}
+        else:
+            model_param = model_param.copy()
 
         # Adopt stellar parameters from class attributes
         # or use the parameters from the model_param dictionary
@@ -513,11 +519,11 @@ class GaiaAstrometry(EpochAstrometry):
             self.g_mag = model_param["g_mag"]
             del model_param["g_mag"]
 
-        elif self.g_mag is None:
+        elif self.g_mag is None and sigma_per_ccd is None:
             raise ValueError(
                 "Please either provide the 'g_mag' in the "
-                "model_param dictionary or run 'query_source()' "
-                "to adopt the values from a Gaia source."
+                "model_param dictionary, run 'query_source()', "
+                "or provide 'sigma_per_ccd'."
             )
 
         if "ra_offset" not in model_param:
@@ -571,21 +577,16 @@ class GaiaAstrometry(EpochAstrometry):
                         verbose=self.verbose,
                     )
 
-                if "sma" not in model_param:
-                    if mass_2 is None:
-                        sma, mass_2 = occ_rate.sample_planets(allow_reject=allow_reject)
-                        mass_2 = mass_2[0]
+                sma, mass_2 = occ_rate.sample_planets(require_planet=require_planet)
 
-                    else:
-                        sma, _ = occ_rate.sample_planets(allow_reject=allow_reject)
+                sma = sma[0]
+                mass_2 = mass_2[0]
 
-                    sma = sma[0]
+                if np.isnan(sma):
+                    binary = False
 
-                    if np.isnan(sma):
-                        binary = False
-
-                    else:
-                        model_param["sma"] = sma
+                else:
+                    model_param["sma"] = sma
 
             if binary:
                 if "ecc" not in model_param:
@@ -684,6 +685,15 @@ class GaiaAstrometry(EpochAstrometry):
 
         # Reject a fraction of the data. About 10% of FOV
         # transits has an issue (see Lindegren et al. 2021)
+
+        if reject_fraction is not None:
+            if reject_fraction < 0.0 or reject_fraction >= 1.0:
+                raise ValueError(
+                    "'reject_fraction' should satisfy " "0 <= reject_fraction < 1."
+                )
+
+        if sigma_per_ccd is not None and sigma_per_ccd <= 0.0:
+            raise ValueError("'sigma_per_ccd' should be positive.")
 
         if reject_fraction is not None:
             rand_unif = rng.uniform(low=0.0, high=1.0, size=len(table_select))
@@ -808,12 +818,11 @@ class GaiaAstrometry(EpochAstrometry):
             f_term = flux_ratio / (1.0 + flux_ratio)
             m_term = mass_ratio / (1.0 + mass_ratio)
 
-            model_param["sma"] *= f_term - m_term
-            model_param["sma"] = abs(model_param["sma"])
+            photocenter_factor = f_term - m_term
+            model_param["sma"] *= abs(photocenter_factor)
 
-            # Convert argument of periastron from relative to photocenter (mas)
-
-            model_param["aop"] = (model_param["aop"] + np.pi) % (2.0 * np.pi)
+            if photocenter_factor < 0.0:
+                model_param["aop"] = (model_param["aop"] + np.pi) % (2.0 * np.pi)
 
             if self.verbose:
                 print(f"\nPhotocenter semi-major axis (mas) = {model_param['sma']:.2f}")
@@ -1083,7 +1092,7 @@ class GaiaAstrometry(EpochAstrometry):
         source_id: typing.Optional[typing.Union[int, np.int64, str]] = None,
         exclude_outliers: bool = True,
         combine_ccds: bool = False,
-    ) -> None:
+    ) -> dict:
         """
         Method for retrieving the epoch astrometry for the selected
         Gaia source. This will only be possible for the future DR4
@@ -1121,9 +1130,11 @@ class GaiaAstrometry(EpochAstrometry):
             print(f"Gaia release: {self.gaia_release}")
             print(f"Source ID: {self.source_id}")
 
-        raise NotImplementedError(
+        warnings.warn(
             "Retrieval of Gaia DR4 and DR5 epoch astrometry is not yet implemented."
         )
+
+        return {}
 
         # gaia_tables = [
         #     "epoch_astrometry",
@@ -1233,11 +1244,6 @@ class GaiaAstrometry(EpochAstrometry):
             data_file, sep=r"\s+", header="infer", comment="#", skip_blank_lines=True
         )
 
-        self.data_table["centroid_pos_al"] = self.data_table["centroid_pos_al"]
-        self.data_table["centroid_pos_error_al"] = self.data_table[
-            "centroid_pos_error_al"
-        ]
-
         if exclude_outliers:
             self.data_table = self.data_table[self.data_table["outlier_flag"] == 0]
 
@@ -1300,7 +1306,7 @@ class GaiaAstrometry(EpochAstrometry):
             print(f"Data shape: {self.data_table.shape}")
 
     @beartype
-    def retrieve_dr4_prelease(
+    def retrieve_dr4_prerelease(
         self,
         source_id: typing.Union[int, np.int64],
         exclude_outliers: bool = True,
@@ -1324,13 +1330,12 @@ class GaiaAstrometry(EpochAstrometry):
             gaia/dr4-prerelease>`_ list.
         exclude_outliers : bool
             Exclude astrometry points that are flagged in the table
-            as outlier (default: True). To be implemented.
+            as outlier (default: True).
         combine_ccds : bool
             Combine/average the measurements of the 9 CCDs per
             transit ID (default: False). The weighted combination
             of the positions and uncertainties is calculated,
             assuming uncorrelated uncertainties between CCDs.
-            To be implemented.
 
         Returns
         -------
@@ -1349,7 +1354,7 @@ class GaiaAstrometry(EpochAstrometry):
             warnings.warn(
                 "By setting 'gaia_release' to 'DR3', the DR4 "
                 "epoch astrometry will be cropped to an end "
-                "date of {self.time_end}."
+                f"date of {self.time_end}."
             )
 
         self.source_id = source_id
@@ -1398,7 +1403,7 @@ class GaiaAstrometry(EpochAstrometry):
         # Extract data of selected source_id
         # Should be part of https://www.cosmos.esa.int/web/gaia/dr4-prerelease
 
-        self.data_table = df_full[df_full["source_id"] == self.source_id]
+        self.data_table = df_full[df_full["source_id"] == self.source_id].copy()
 
         # Remove column 'centroid_pos_ac' or any column with all rows set to NaN
 
@@ -1456,9 +1461,10 @@ class GaiaAstrometry(EpochAstrometry):
 
         n_selected = self.data_table.shape[0]
 
-        print("\nNumber of rows for selected source:")
-        print(f"   - Total = {n_total}")
-        print(f"   - Selected = {n_selected}")
+        if self.verbose:
+            print("\nNumber of rows for selected source:")
+            print(f"   - Total = {n_total}")
+            print(f"   - Selected = {n_selected}")
 
         # Sort data chronologically
 
@@ -1642,6 +1648,11 @@ class HipparcosAstrometry(EpochAstrometry):
         self.hgca_epoch_hip = None
 
         self.hgca_chisq = None
+
+        self.hgca_cov_dpm_gaia_hg = None
+        self.hgca_dpm_gaia_hg_error = None
+        self.hgca_cov_dv_gaia_hg = None
+        self.hgca_dv_gaia_hg_error = None
 
         self.ref_epoch = Time(1991.25, format="jyear", scale="tcb")
         self.time_start = Time("1989-11-26", scale="utc")
@@ -2112,6 +2123,8 @@ class HipparcosAstrometry(EpochAstrometry):
         )
 
         # Gaia minus Hipparcos-Gaia proper-motion anomaly (mas/yr)
+        # Assuming the Gaia and HG proper-motion measurements are independent
+
         self.hgca_dpm_gaia_hg = self.hgca_pm_gaia - self.hgca_pm_hg
         self.hgca_cov_dpm_gaia_hg = self.hgca_cov_gaia + self.hgca_cov_hg
 
@@ -2154,7 +2167,9 @@ class HipparcosAstrometry(EpochAstrometry):
         # where μ and ϖ are expressed in the same angular units
         # (e.g. both in mas). The quantity 1 au/yr equals
         # approximately 4.74047 km/s.
-        # Use the parallax from HGCA.
+
+        # Convert the proper-motion anomaly to tangential
+        # velocity using the Hipparcos parallax.
 
         auyear_kms = (c.au / u.year).to("km/s").value
         self.hgca_dv_gaia_hg = auyear_kms * self.hgca_dpm_gaia_hg / self.parallax
@@ -2167,26 +2182,24 @@ class HipparcosAstrometry(EpochAstrometry):
 
             print(f"HGCA chi-square: {self.hgca_chisq:.2f}")
 
-            # Proper-motion uncertainties from the covariance matrices
+        # Proper-motion uncertainties from the covariance matrices
 
-            pm_hip_error = np.sqrt(np.diag(self.hgca_cov_hip))
-            pm_gaia_error = np.sqrt(np.diag(self.hgca_cov_gaia))
-            pm_hg_error = np.sqrt(np.diag(self.hgca_cov_hg))
+        pm_hip_error = np.sqrt(np.diag(self.hgca_cov_hip))
+        pm_gaia_error = np.sqrt(np.diag(self.hgca_cov_gaia))
+        pm_hg_error = np.sqrt(np.diag(self.hgca_cov_hg))
 
-            # Assuming the Gaia and HG proper-motion measurements are independent
-            self.hgca_cov_dpm_gaia_hg = self.hgca_cov_gaia + self.hgca_cov_hg
+        # Uncertainties of the RA and Dec components (mas/yr)
+        self.hgca_dpm_gaia_hg_error = np.sqrt(np.diag(self.hgca_cov_dpm_gaia_hg))
 
-            # Uncertainties of the RA and Dec components (mas/yr)
-            self.hgca_dpm_gaia_hg_error = np.sqrt(np.diag(self.hgca_cov_dpm_gaia_hg))
+        # Covariance of the tangential velocity anomaly (km/s)^2
+        self.hgca_cov_dv_gaia_hg = (
+            auyear_kms / self.parallax
+        ) ** 2 * self.hgca_cov_dpm_gaia_hg
 
-            # Covariance of the tangential velocity anomaly (km/s)^2
-            self.hgca_cov_dv_gaia_hg = (
-                auyear_kms / self.parallax
-            ) ** 2 * self.hgca_cov_dpm_gaia_hg
+        # 1-sigma uncertainties
+        self.hgca_dv_gaia_hg_error = np.sqrt(np.diag(self.hgca_cov_dv_gaia_hg))
 
-            # 1-sigma uncertainties
-            dv_error = np.sqrt(np.diag(self.hgca_cov_dv_gaia_hg))
-
+        if self.verbose:
             print(
                 "\nHipparcos proper motion:"
                 f"\n   PM RA  = {self.hgca_pm_hip[0]:.4f}"
@@ -2222,9 +2235,9 @@ class HipparcosAstrometry(EpochAstrometry):
             print(
                 "\nTangential velocity anomaly:"
                 f"\n   Delta v RA   = {self.hgca_dv_gaia_hg[0]:.4f}"
-                f" +/- {dv_error[0]:.4f} km/s"
+                f" +/- {self.hgca_dv_gaia_hg_error[0]:.4f} km/s"
                 f"\n   Delta v Dec  = {self.hgca_dv_gaia_hg[1]:.4f}"
-                f" +/- {dv_error[1]:.4f} km/s"
+                f" +/- {self.hgca_dv_gaia_hg_error[1]:.4f} km/s"
             )
 
             print("\nReference: Brandt T. D. (2021), ApJS, 254, 42")

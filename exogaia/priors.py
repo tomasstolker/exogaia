@@ -50,6 +50,9 @@ class UniformPrior(Prior):
             None
         """
 
+        if min_val >= max_val:
+            raise ValueError("'min_val' should be smaller than 'max_val'")
+
         self.min_val = min_val
         self.max_val = max_val
         self.rng = np.random.default_rng()
@@ -127,6 +130,14 @@ class LogUniformPrior(Prior):
             None
         """
 
+        if min_val <= 0.0:
+            raise ValueError("'min_val' should be larger than zero")
+
+        if min_val >= max_val:
+            raise ValueError("'min_val' should be smaller than 'max_val'")
+
+        self.min_val = min_val
+        self.max_val = max_val
         self.log_min = np.log10(min_val)
         self.log_max = np.log10(max_val)
         self.rng = np.random.default_rng()
@@ -142,7 +153,7 @@ class LogUniformPrior(Prior):
             Details on the prior.
         """
 
-        return f"LogUniform: [{self.log_min:.2f}, {self.log_max:.2f}]"
+        return f"LogUniform: [{self.min_val:.2e}, {self.max_val:.2e}]"
 
     @beartype
     def draw_samples(self, n_samples: int) -> np.ndarray:
@@ -221,6 +232,12 @@ class NormalPrior(Prior):
             None
         """
 
+        if sigma <= 0.0:
+            raise ValueError("'sigma' should be larger than zero")
+
+        if truncate_upper is not None and truncate_upper <= 0.0:
+            raise ValueError("'truncate_upper' should be larger than zero.")
+
         self.mu = mu
         self.sigma = sigma
         self.truncate_zero = truncate_zero
@@ -287,12 +304,8 @@ class NormalPrior(Prior):
 
             samples = truncnorm.ppf(unit_samples, a, b, loc=self.mu, scale=self.sigma)
 
-            samples = truncnorm.isf(
-                unit_samples, a, np.inf, loc=self.mu, scale=self.sigma
-            )
-
         else:
-            samples = self.mu + self.sigma * norm.ppf(unit_samples)
+            samples = norm.ppf(unit_samples, loc=self.mu, scale=self.sigma)
 
         return samples
 
@@ -429,6 +442,8 @@ class FixedPrior(Prior):
 
         Returns
         -------
-        NoneType
-            None
+        np.ndarray
+            Array filled with the fixed parameter value.
         """
+
+        return np.full(unit_samples.shape, self.fix_val)

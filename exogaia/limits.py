@@ -10,7 +10,7 @@ import numpy as np
 from beartype import beartype, typing
 from matplotlib.figure import Figure
 from scipy.ndimage import gaussian_filter
-
+from scipy.stats import chi2, norm
 from tqdm.auto import tqdm
 
 from exogaia.data import GaiaAstrometry
@@ -20,9 +20,8 @@ from exogaia.utils import print_section
 
 class CompletenessMap:
     """
-    Class for computing a completeness map of detecting a
-    proper motion acceleration as function of planetary
-    mass and semi-major axis.
+    Class for computing companion detection completeness maps
+    as a function of companion mass and semi-major axis.
     """
 
     @beartype
@@ -40,8 +39,8 @@ class CompletenessMap:
         primary_mass : tuple(float, float)
             Primary mass and uncertainty (Msun).
         gaia_release : str
-            Gaia release (DR3, DR4, DR5) for which the completeness
-            map will be computed.
+            Gaia release (DR1, DR2, DR3, DR4, DR5) for which the
+            completeness map will be computed.
 
         Returns
         -------
@@ -91,20 +90,29 @@ class CompletenessMap:
         orbits on a grid of companion masses and semi-major axes.
         For each grid point, ``n_samples`` realizations are generated
         and fit with either a 7-parameter acceleration model, a
-        9-parameter acceleration model, or a full orbital model.
+        9-parameter acceleration + jerk model, or a full orbital model.
         Completeness is defined as the fraction of realizations that
-        satisfy the selected detection criterion.
+        satisfy the selected detection criterion. Companions are
+        assumed to contribute zero flux to the photocenter,
+        regardless of the companion mass.
 
         Parameters
         ----------
         det_type : str
             Detection type. Supported values are ``"accel_7param"``,
-            ``"accel_9param"``, and ``"orbit"``. Acceleration and jerk
-            detections are based on the significance of their two-dimensional
-            vectors using the full covariance matrix. Orbital detections are
-            based on the fitted orbital period and its uncertainty.
+            ``"accel_9param"``, and ``"orbit"``. For the 7-parameter
+            model, detection is based on the joint significance of the
+            two acceleration components. For the 9-parameter model,
+            detection is based on the joint significance of the two
+            acceleration and two jerk components. The full covariance
+            matrix is used in both cases. Orbital detections are
+            currently based on the fitted orbital period and its
+            uncertainty.
         n_sigma : float, optional
-            Detection significance threshold (default: 3.0).
+            Gaussian-equivalent detection significance threshold
+            (default: 3.0). For the acceleration models, this is
+            converted to the corresponding chi-square threshold for
+            the number of components being tested.
         n_samples : int
             Number of Monte Carlo realizations per grid point
             (default: 30).
@@ -129,24 +137,68 @@ class CompletenessMap:
 
         Notes
         -----
-        For ``det_type="accel_7param"``, the acceleration significance is
+        For ``det_type="accel_7param"``, the detection statistic is
 
-            sqrt(a.T @ C_a^-1 @ a),
+            Q = a.T @ C_a^-1 @ a,
 
-        where ``a`` is the two-dimensional acceleration vector and ``C_a``
-        is its covariance matrix. The same criterion is applied to the jerk
-        vector for ``det_type="accel_9param"``.
+        where ``a`` is the two-dimensional acceleration vector and
+        ``C_a`` is its covariance matrix. Under the null hypothesis,
+        ``Q`` follows a chi-square distribution with two degrees of
+        freedom.
 
-        For ``det_type="orbit"``, a realization is currently considered
-        detected when
+        For ``det_type="accel_9param"``, the detection statistic is
+        computed from the four-dimensional vector containing the two
+        acceleration and two jerk components. The full 4x4 covariance
+        matrix is used, and the statistic follows a chi-square
+        distribution with four degrees of freedom under the null
+        hypothesis.
+
+        In both cases, ``n_sigma`` is interpreted as a two-sided
+        Gaussian-equivalent significance and converted to the
+        corresponding chi-square threshold.
+
+        For ``det_type="orbit"``, a realization is currently
+        considered detected when
 
             period / sigma_period > n_sigma.
 
-        The resulting map gives the detection completeness as a function
-        of companion mass and semi-major axis.
+        The resulting map gives the detection completeness as a
+        function of companion mass and semi-major axis.
         """
 
         print_section("Calculate completeness")
+
+        if n_sigma <= 0.0:
+            raise ValueError("'n_sigma' should be positive")
+
+        if n_samples <= 0:
+            raise ValueError("'n_samples' should be positive")
+
+        print(f"Detection type: {det_type}")
+        print(f"Detection significance: {n_sigma:.1f} sigma")
+
+        # Gaussian-equivalent false-alarm probability
+        false_alarm_prob = 2.0 * norm.sf(n_sigma)
+
+        if det_type == "accel_7param":
+            n_dof_det = 2
+
+        elif det_type == "accel_9param":
+            n_dof_det = 4
+
+        else:
+            n_dof_det = None
+
+        if n_dof_det is not None:
+            chi2_threshold = chi2.isf(
+                false_alarm_prob,
+                df=n_dof_det,
+            )
+
+            print(f"Detection degrees of freedom: {n_dof_det}")
+            print(f"Chi-square threshold: {chi2_threshold:.2f}")
+
+        print()
 
         if mass_points is None:
             # Grid points for companion mass (Msun)
@@ -154,77 +206,82 @@ class CompletenessMap:
 
         if sma_points is None:
             # Grid points for semi-major axis (au)
-            sma_points = 10.0 ** np.linspace(np.log10(0.1), np.log10(100.0), 50)
+            sma_points = np.logspace(-1, 2, 50)
+
+        if np.any(mass_points <= 0.0):
+            raise ValueError("All companion masses should be positive")
+
+        if np.any(sma_points <= 0.0):
+            raise ValueError("All semi-major axes should be positive")
 
         compl_map = np.zeros((mass_points.size, sma_points.size))
 
         pbar = tqdm(total=mass_points.size * sma_points.size)
 
-        n_detect = 0
-
         for mass2_idx, mass2_item in enumerate(mass_points):
             for sma_idx, sma_item in enumerate(sma_points):
+                n_detect = 0
+
                 for _ in range(n_samples):
                     model_param = {"sma": sma_item}
 
                     self.epoch_astrom.simulate_data(
                         model_param=model_param,
                         mass_2=mass2_item,
+                        flux_ratio=0.0,
                     )
 
                     least_sq = LeastSquares(epoch_astrometry=self.epoch_astrom)
 
                     if det_type == "accel_7param":
-                        least_sq.accel_7param(plot_file=None, verbose=False)
-
-                        # Acceleration dmu/dt (mas/yr^2)
-                        accel_components = least_sq.best_param[5:7]
-                        accel = np.linalg.norm(accel_components)
-
-                        # Gradient of |a| with respect to the RA and Dec components
-                        grad_accel = accel_components / accel
-
-                        # Covariance matrix of the RA and Dec acceleration components
-                        cov_accel = least_sq.param_cov[5:7, 5:7]
-
-                        # Uncertainty on the total acceleration
-                        # sigma_accel = np.sqrt(grad_accel @ cov_accel @ grad_accel)
-
-                        # Significance of the 2D acceleration vector
-                        # using its full covariance matrix
-                        snr_accel = np.sqrt(
-                            accel_components
-                            @ np.linalg.solve(cov_accel, accel_components)
+                        least_sq.accel_7param(
+                            plot_file=None,
+                            verbose=False,
                         )
 
-                        if snr_accel > n_sigma:
+                        # RA and Dec acceleration components (mas/yr^2)
+
+                        signal_param = least_sq.best_param[5:7]
+
+                        # Full covariance matrix of the acceleration
+
+                        signal_cov = least_sq.param_cov[5:7, 5:7]
+
+                        # Chi-square significance of the 2D acceleration vector
+
+                        chi2_signal = signal_param @ np.linalg.solve(
+                            signal_cov,
+                            signal_param,
+                        )
+
+                        if chi2_signal > chi2_threshold:
                             n_detect += 1
 
                     elif det_type == "accel_9param":
-                        least_sq.accel_9param(plot_file=None, verbose=False)
-
-                        # Jerk d²mu/dt² (mas/yr^3)
-                        # Parameters 7 and 8 are the RA and Dec jerk components.
-                        jerk_components = least_sq.best_param[7:9]
-                        jerk = np.linalg.norm(jerk_components)
-
-                        # Gradient of |j| with respect to the RA and Dec components
-                        grad_jerk = jerk_components / jerk
-
-                        # Covariance matrix of the RA and Dec jerk components
-                        cov_jerk = least_sq.param_cov[7:9, 7:9]
-
-                        # Propagate the component uncertainties and covariance into the
-                        # uncertainty on the total jerk.
-                        # sigma_jerk = np.sqrt(grad_jerk @ cov_jerk @ grad_jerk)
-
-                        # Significance of the 2D jerk vector
-                        # using its full covariance matrix
-                        snr_jerk = np.sqrt(
-                            jerk_components @ np.linalg.solve(cov_jerk, jerk_components)
+                        least_sq.accel_9param(
+                            plot_file=None,
+                            verbose=False,
                         )
 
-                        if snr_jerk > n_sigma:
+                        # RA and Dec acceleration and jerk components
+                        # Parameters 5:7 are acceleration (mas/yr^2)
+                        # and parameters 7:9 are jerk (mas/yr^3).
+
+                        signal_param = least_sq.best_param[5:9]
+
+                        # Full covariance matrix of acceleration and jerk
+
+                        signal_cov = least_sq.param_cov[5:9, 5:9]
+
+                        # Chi-square significance of the joint
+                        # 4D acceleration + jerk vector
+
+                        chi2_signal = signal_param @ np.linalg.solve(
+                            signal_cov,
+                            signal_param,
+                        )
+
+                        if chi2_signal > chi2_threshold:
                             n_detect += 1
 
                     else:
@@ -236,46 +293,61 @@ class CompletenessMap:
                         )
 
                         least_sq.orbit_fit(
-                            inc_jitter=False, plot_file=None, verbose=False
+                            inc_jitter=False,
+                            plot_file=None,
+                            verbose=False,
                         )
 
                         if least_sq.fit_success:
-                            period = least_sq.best_param[9]
-                            sigma_period = np.sqrt(np.diag(least_sq.param_cov))[9]
+                            # Orbital period and uncertainty
+                            period = least_sq.best_param[5]
+                            sigma_period = np.sqrt(least_sq.param_cov[5, 5])
 
-                            if period / sigma_period > n_sigma:
+                            # This only checks the significance of the period
+                            if sigma_period > 0.0 and period / sigma_period > n_sigma:
                                 n_detect += 1
 
                 compl_map[mass2_idx, sma_idx] = float(n_detect) / float(n_samples)
 
                 pbar.update(1)
 
+        pbar.close()
+
         if filter_sigma is not None:
             # Apply Gaussian filter to smooth out Monte Carlo noise
-            compl_map = gaussian_filter(compl_map, sigma=filter_sigma)
+            compl_map = gaussian_filter(
+                compl_map,
+                sigma=filter_sigma,
+            )
 
         fig, ax = plt.subplots(figsize=(5, 3))
 
         mesh = ax.pcolormesh(
-            sma_points, mass_points, 100.0 * compl_map, vmin=0.0, vmax=100.0
+            sma_points,
+            mass_points,
+            100.0 * compl_map,
+            vmin=0.0,
+            vmax=100.0,
         )
 
-        cbar = plt.colorbar(mesh, ax=ax)
+        cbar = fig.colorbar(mesh, ax=ax)
         cbar.set_label("Completeness (%)", fontsize=12)
 
         ax.set_xlabel("Semi-major axis (au)", fontsize=12)
         ax.set_ylabel(r"Companion mass ($M_\odot$)", fontsize=12)
         ax.set_xscale("log")
         ax.set_yscale("log")
+
         ax.set_title(
-            rf"{self.gaia_release} ${n_sigma}\sigma$ completeness ({det_type})",
+            rf"Gaia {self.gaia_release} "
+            rf"${n_sigma}\sigma$ completeness ({det_type})",
             fontsize=10.0,
         )
 
         if plot_file is None:
             plt.show()
         else:
-            plt.savefig(plot_file)
-            plt.close(fig)
+            print(f"\nOutput file: {plot_file}")
+            fig.savefig(plot_file)
 
         return fig

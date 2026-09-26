@@ -73,6 +73,8 @@ class LeastSquares:
         self.chi2_red = None
         self.n_dof = None
         self.fit_success = None
+        self.jitter = None
+        self.jitter_sigma = None
 
     def __repr__(self):
         """
@@ -379,7 +381,7 @@ class LeastSquares:
 
         # Covariance inflation
         if infl_fact > 1.0:
-            cov_matrix *= infl_fact
+            cov_matrix *= infl_fact**2
 
         # Uncorrelated uncertainties
         param_sig = np.sqrt(np.diag(cov_matrix))
@@ -990,13 +992,13 @@ class LeastSquares:
 
             axs[1].set_title(
                 rf"$\dot{{\mu}}_\mathrm{{RA}}$ = {self.best_param[5]:.3f} "
-                rf"$\pm$ {param_sig[5]:.3f} $\mu$as/yr$^2$" + "\n"
+                rf"$\pm$ {param_sig[5]:.3f} mas/yr$^2$" + "\n"
                 rf"$\dot{{\mu}}_\mathrm{{Dec}}$ = {self.best_param[6]:.3f} "
-                rf"$\pm$ {param_sig[6]:.3f} $\mu$as/yr$^2$"
+                rf"$\pm$ {param_sig[6]:.3f} mas/yr$^2$"
             )
 
-            axs[1].set_xlabel(r"$\Delta\alpha$ ($\mu$as)")
-            axs[1].set_ylabel(r"$\Delta\delta$ ($\mu$as)")
+            axs[1].set_xlabel(r"$\Delta\alpha$ (mas)")
+            axs[1].set_ylabel(r"$\Delta\delta$ (mas)")
             axs[1].invert_xaxis()
 
             axs[2].errorbar(
@@ -1368,17 +1370,17 @@ class LeastSquares:
 
             axs[1].set_title(
                 rf"$\dot{{\mu}}_\mathrm{{RA}}$ = {self.best_param[5]:.3f} "
-                rf"$\pm$ {param_sig[5]:.3f} $\mu$as/yr$^2$" + "\n"
+                rf"$\pm$ {param_sig[5]:.3f} mas/yr$^2$" + "\n"
                 rf"$\dot{{\mu}}_\mathrm{{Dec}}$ = {self.best_param[6]:.3f} "
-                rf"$\pm$ {param_sig[6]:.3f} $\mu$as/yr$^2$" + "\n"
+                rf"$\pm$ {param_sig[6]:.3f} mas/yr$^2$" + "\n"
                 rf"$\ddot{{\mu}}_\mathrm{{RA}}$ = {self.best_param[7]:.3f} "
-                rf"$\pm$ {param_sig[7]:.3f} $\mu$as/yr$^3$" + "\n"
+                rf"$\pm$ {param_sig[7]:.3f} mas/yr$^3$" + "\n"
                 rf"$\ddot{{\mu}}_\mathrm{{Dec}}$ = {self.best_param[8]:.3f} "
-                rf"$\pm$ {param_sig[8]:.3f} $\mu$as/yr$^3$"
+                rf"$\pm$ {param_sig[8]:.3f} mas/yr$^3$"
             )
 
-            axs[1].set_xlabel(r"$\Delta\alpha$ ($\mu$as)")
-            axs[1].set_ylabel(r"$\Delta\delta$ ($\mu$as)")
+            axs[1].set_xlabel(r"$\Delta\alpha$ (mas)")
+            axs[1].set_ylabel(r"$\Delta\delta$ (mas)")
             axs[1].invert_xaxis()
 
             axs[2].errorbar(
@@ -1449,19 +1451,13 @@ class LeastSquares:
         map_type: str = "chi2_det",
         plot_file: typing.Optional[str] = None,
         verbose: bool = True,
-        n_sigma: typing.List[Real] = [1, 3, 5],
+        n_sigma: typing.Optional[typing.Sequence[Real]] = None,
     ) -> typing.Optional[Figure]:
         """
-        Method for exploring a grid of orbits of varying semi-major
-        axis, eccentricity, and time of periastron. The semi-major
-        axis is converted in a period, using the ``primary_mass``
-        from the ``EpochAstrometry`` and ignoring the secondary mass.
-        For each combination, the Kepler equation is solved. The other
-        parameters (RA, Dec, parallax, proper motion, Thiele-Innes
-        constants) are all linear and optimized with a least-squares.
-        The output plot shows the RUWE for each semi-major axis and
-        eccentricity pair, with the time of periastron selected that
-        minimizes the RUWE.
+        Explore a grid of orbital period, eccentricity, and relative
+        time of periastron. For each combination, the Kepler equation
+        is solved and the five astrometric parameters and four
+        Thiele-Innes constants are optimized with linear least squares.
 
         Parameters
         ----------
@@ -1481,10 +1477,10 @@ class LeastSquares:
             is created when the argument is set to ``None``.
         verbose : bool
             Print some information (default: True).
-        n_sigma : list(float)
-            List with the number of sigmas for for contours
-            will be drawn when the argument of ``map_type``
-            is set to 'chi2_param' (default: [1, 3, 5]).
+        n_sigma : tuple(float), None
+            Gaussian-equivalent significance levels for the
+            confidence contours when ``map_type="chi2_param"``.
+            If ``None``, 1, 3, and 5 sigma contours are used.
 
         Returns
         -------
@@ -1501,7 +1497,10 @@ class LeastSquares:
                 "to 'ruwe', 'chi2_det', or 'chi2_param."
             )
 
-        n_sigma = np.array(n_sigma)
+        if n_sigma is None:
+            n_sigma = np.array([1.0, 3.0, 5.0])
+        else:
+            n_sigma = np.array(n_sigma)
 
         # Epoch astrometry data
         obs_pos = self.data_table["centroid_pos_al"].to_numpy()
@@ -1533,6 +1532,9 @@ class LeastSquares:
         tau_grid = np.zeros((logp_list.size, ecc_list.size, tau_list.size))
 
         global_ruwe = np.inf
+        global_chi2 = None
+        global_chi2_red = None
+        global_n_dof = None
         global_model = None
         global_param = None
         global_cov = None
@@ -1575,6 +1577,9 @@ class LeastSquares:
 
                     if ruwe < global_ruwe:
                         global_ruwe = ruwe
+                        global_chi2 = self.chi2
+                        global_chi2_red = self.chi2_red
+                        global_n_dof = self.n_dof
                         global_model = best_model
                         global_param = np.hstack(
                             [best_param, period, ecc_item, tau_item]
@@ -1709,6 +1714,9 @@ class LeastSquares:
 
         self.best_model = global_model
         self.ruwe = global_ruwe
+        self.chi2 = global_chi2
+        self.chi2_red = global_chi2_red
+        self.n_dof = global_n_dof
 
         # Create optional figure
 
@@ -1727,18 +1735,20 @@ class LeastSquares:
         if plot_file is not None:
             # Select minimum RUWE or chi2 along the 3rd axis to create a 2D array
 
-            map_grid_2d = np.nanmin(map_grid, axis=2)
+            if map_type == "chi2_det":
+                map_grid_2d = np.nanmax(map_grid, axis=2)
+                best_idx = np.nanargmax(map_grid, axis=2)
 
-            # Select indices with the minimum RUWE along the 3rd axis
-
-            min_idx = np.argmin(map_grid, axis=2)
+            else:
+                map_grid_2d = np.nanmin(map_grid, axis=2)
+                best_idx = np.nanargmin(map_grid, axis=2)
 
             # Create a grid with the best-fit tau for each period-ecc pair
 
             tau_best = np.zeros((logp_list.size, ecc_list.size))
             for logp_idx, logp_item in enumerate(logp_list):
                 for ecc_idx, ecc_item in enumerate(ecc_list):
-                    tau_idx = min_idx[logp_idx, ecc_idx]
+                    tau_idx = best_idx[logp_idx, ecc_idx]
                     tau_best[logp_idx, ecc_idx] = tau_grid[logp_idx, ecc_idx, tau_idx]
 
             # Create goodness-of-fit plot
@@ -1806,7 +1816,7 @@ class LeastSquares:
                 # Grid shows two parameters: P and e
                 df_chi2 = 2
 
-                # Delta chi2 = chi2_5param - chi2_orbit
+                # Delta chi2 = chi2_orbit - chi2_min
                 delta_chi2_levels = chi2.ppf(q=q_chi2, df=df_chi2)
 
                 cs = ax.contour(
@@ -1904,6 +1914,7 @@ class LeastSquares:
 
         # Epoch astrometry data
         obs_time = self.data_table["obs_time_tcb"].to_numpy()
+        obs_pos = self.data_table["centroid_pos_al"].to_numpy()
         obs_err = self.data_table["centroid_pos_error_al"].to_numpy()
         sin_scan_ang = self.data_table["sin_scan_ang"].to_numpy()
         cos_scan_ang = self.data_table["cos_scan_ang"].to_numpy()
@@ -2057,6 +2068,7 @@ class LeastSquares:
 
             fit_residuals = fit_model.calc_residuals(fit_model_param)
 
+            self.best_model = obs_pos - fit_residuals
             self.chi2 = np.sum(fit_residuals**2 / fit_var)
             self.n_dof = fit_residuals.size - self.best_param.size
             self.chi2_red = self.chi2 / self.n_dof
@@ -2178,6 +2190,10 @@ class LeastSquares:
                 print(f"   - Companion mass (Msun) = {mass_2:.3e}")
 
             if inc_jitter:
+                # Store the jitter separately
+                self.jitter = self.best_param[-1]
+                self.jitter_sigma = param_sig[-1]
+
                 # Remove the jitter parameter
                 self.best_param = self.best_param[:-1]
                 self.param_cov = self.param_cov[:-1, :-1]
@@ -2413,7 +2429,7 @@ class LeastSquares:
                     obs_time=np.array([t_per + 0.5 * period_years]),
                 )
 
-                # Plot periastron and line of nodes
+                # Plot periastron and line of apsides
 
                 axs[1].plot(
                     delta_ra_per,
@@ -2434,8 +2450,56 @@ class LeastSquares:
                     lw=1,
                     marker="none",
                     color="tab:gray",
-                    label="Line of nodes",
+                    label="Line of apsides",
                 )
+
+                # Signed distance perpendicular to the line of nodes
+
+                pan = model_param["pan"]
+
+                node_perp = delta_ra_orbit_full * np.cos(
+                    pan
+                ) - delta_dec_orbit_full * np.sin(pan)
+
+                # Find the two crossings of the orbit with the line of nodes
+
+                cross_idx = np.where(node_perp[:-1] * node_perp[1:] < 0.0)[0]
+
+                # Linear interpolation to the exact crossing
+
+                node_points = []
+
+                for idx in cross_idx:
+                    frac = -node_perp[idx] / (node_perp[idx + 1] - node_perp[idx])
+
+                    node_ra = delta_ra_orbit_full[idx] + frac * (
+                        delta_ra_orbit_full[idx + 1] - delta_ra_orbit_full[idx]
+                    )
+
+                    node_dec = delta_dec_orbit_full[idx] + frac * (
+                        delta_dec_orbit_full[idx + 1] - delta_dec_orbit_full[idx]
+                    )
+
+                    node_points.append((node_ra, node_dec))
+
+                # Plot line of nodes
+
+                if len(node_points) == 2:
+                    axs[1].plot(
+                        [node_points[0][0], node_points[1][0]],
+                        [node_points[0][1], node_points[1][1]],
+                        ls="--",
+                        lw=1.0,
+                        color="tab:gray",
+                        label="Line of nodes",
+                    )
+                else:
+                    warnings.warn(
+                        "Expected two intersections of the orbit "
+                        "with the line of nodes, but found "
+                        f"{len(node_points)}. The line of nodes "
+                        "is not plotted."
+                    )
 
                 axs[1].set_title(
                     rf"$P = {self.best_param[5]:.3f} \pm "

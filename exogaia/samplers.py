@@ -15,6 +15,7 @@ import numpy as np
 import reddemcee
 
 from beartype import beartype, typing
+from dynesty.utils import resample_equal
 from schwimmbad import MPIPool
 
 from exogaia.data import EpochAstrometry
@@ -36,18 +37,29 @@ class NestedSampler:
 
     @beartype
     def __init__(
-        self, epoch_astrometry: EpochAstrometry, least_squares: LeastSquares
+        self,
+        epoch_astrometry: EpochAstrometry,
+        least_squares: typing.Optional[LeastSquares] = None,
+        restrict_node: bool = False,
     ) -> None:
         """
         Parameters
         ----------
         epoch_astrometry : EpochAstrometry
             ``EpochAstrometry`` object that contains the data.
-        least_squares : LeastSquares
-            ``LeastSquares`` object after running
+        least_squares : LeastSquares, None
+            Optional ``LeastSquares`` object after running
             ``:func:`~exogaia.leastsq.LeastSquares.orbit_fit```
             such that the ``best_param`` attribute contains
             the best-fit parameters from the least-squares fit.
+            By setting this argument, normal priors based on
+            the least-squares results will be used. In general,
+            however, it is recommended to set the argument to
+            ``None`` to prevent biasing the posterior.
+        restrict_node : bool
+            If ``True``, restrict the position angle of the
+            ascending node to [0, 180) deg to remove the
+            180 deg degeneracy without radial velocity.
 
         Returns
         -------
@@ -61,6 +73,7 @@ class NestedSampler:
         self.data_table = epoch_astrometry.data_table
         self.primary_mass = epoch_astrometry.primary_mass
         self.least_squares = least_squares
+        self.restrict_node = restrict_node
 
         self.output_folder = None
         self.ln_z = None
@@ -113,128 +126,134 @@ class NestedSampler:
             None
         """
 
-        self.priors["ra_offset"] = NormalPrior(self.least_squares.best_param[0], 0.1)
-        self.priors["dec_offset"] = NormalPrior(self.least_squares.best_param[1], 0.1)
-
-        self.priors["parallax"] = NormalPrior(
-            self.least_squares.best_param[2], 0.1, truncate_zero=True
-        )
-
-        self.priors["pmra"] = NormalPrior(self.least_squares.best_param[3], 0.1)
-        self.priors["pmdec"] = NormalPrior(self.least_squares.best_param[4], 0.1)
-
         if (
-            len(self.least_squares.best_param) == 12
-            and self.least_squares.param_cov is not None
+            self.least_squares is None
+            or self.least_squares.best_param is None
+            or self.least_squares.param_cov is None
         ):
-            param_sig = np.sqrt(np.diag(self.least_squares.param_cov))
+            best_param = None
+            param_cov = None
+
+        else:
+            best_param = self.least_squares.best_param
+            param_cov = self.least_squares.param_cov
+
+        # Default stellar track priors
+
+        self.priors["ra_offset"] = UniformPrior(-100.0, 100.0)
+        self.priors["dec_offset"] = UniformPrior(-100.0, 100.0)
+        self.priors["parallax"] = UniformPrior(0.0, 100.0)
+        self.priors["pmra"] = UniformPrior(-200.0, 200.0)
+        self.priors["pmdec"] = UniformPrior(-200.0, 200.0)
+
+        # Default orbit priors
+
+        self.priors["per"] = LogUniformPrior(1e1, 5e3)
+        self.priors["ecc"] = UniformPrior(0.0, 1.0)
+        self.priors["tau"] = UniformPrior(0.0, 1.0)
+        self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
+        self.priors["inc"] = SinPrior()
+        self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
+
+        if self.restrict_node:
+            self.priors["pan"] = UniformPrior(0.0, np.pi)
+        else:
+            self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
+
+        # Use the least-squares solution for the astrometric priors
+
+        if best_param is not None:
+            self.priors["ra_offset"] = NormalPrior(best_param[0], 0.1)
+            self.priors["dec_offset"] = NormalPrior(best_param[1], 0.1)
+            self.priors["parallax"] = NormalPrior(
+                best_param[2], 0.1, truncate_zero=True
+            )
+            self.priors["pmra"] = NormalPrior(best_param[3], 0.1)
+            self.priors["pmdec"] = NormalPrior(best_param[4], 0.1)
+
+        # Use the orbital least-squares solution when its covariance is available
+
+        if best_param is not None and len(best_param) == 12 and param_cov is not None:
+            param_cov = np.asarray(param_cov)
+
+            if param_cov.shape != (12, 12):
+                raise ValueError(
+                    "The covariance matrix of a 12-parameter orbital fit "
+                    f"should have shape (12, 12), not {param_cov.shape}."
+                )
+
+            param_var = np.diag(param_cov)
+            param_sig = np.sqrt(param_var)
 
             self.priors["per"] = NormalPrior(
-                self.least_squares.best_param[5], param_sig[5], truncate_zero=True
+                best_param[5],
+                param_sig[5],
+                truncate_zero=True,
             )
+
             self.priors["ecc"] = NormalPrior(
-                self.least_squares.best_param[6],
+                best_param[6],
                 param_sig[6],
                 truncate_zero=True,
                 truncate_upper=1.0,
             )
+
             self.priors["tau"] = NormalPrior(
-                self.least_squares.best_param[7],
+                best_param[7],
                 param_sig[7],
                 truncate_zero=True,
                 truncate_upper=1.0,
             )
+
             self.priors["sma"] = NormalPrior(
-                self.least_squares.best_param[8], param_sig[8], truncate_zero=True
+                best_param[8],
+                param_sig[8],
+                truncate_zero=True,
             )
+
             self.priors["inc"] = NormalPrior(
-                self.least_squares.best_param[9],
+                best_param[9],
                 param_sig[9],
                 truncate_zero=True,
                 truncate_upper=np.pi,
             )
+
             self.priors["aop"] = NormalPrior(
-                self.least_squares.best_param[10],
+                best_param[10],
                 param_sig[10],
                 truncate_zero=True,
                 truncate_upper=2.0 * np.pi,
             )
+
             self.priors["pan"] = NormalPrior(
-                self.least_squares.best_param[11],
+                best_param[11],
                 param_sig[11],
                 truncate_zero=True,
                 truncate_upper=2.0 * np.pi,
             )
 
-        else:
-            self.priors["per"] = LogUniformPrior(1e1, 1e5)
-            self.priors["ecc"] = UniformPrior(0.0, 1.0)
-            self.priors["tau"] = UniformPrior(0.0, 1.0)
-            self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
-            self.priors["inc"] = SinPrior()
-            self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
-            self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
-
     @beartype
-    def prior_transform(self, cube):
+    def prior_transform(self, unit_cube: np.ndarray) -> np.ndarray:
         """
-        Method for transforming the unit cube into a cube
-        with parameter samples.
+        Transform samples from the unit cube to the parameter priors.
 
         Parameters
         ----------
-        cube : LP_c_double
-            Input unit cube.
+        unit_cube : np.ndarray
+            Samples from the unit cube.
 
         Returns
         -------
-        LP_c_double
-            Output cube with sampled model parameters.
+        np.ndarray
+            Parameter values transformed according to the priors.
         """
 
-        # RA/Dec offset at Gaia reference epoch
-        # relative to the Gaia coordinates of the
-        # source at the reference epoch (mas)
-        # Default: uniform [-10, 10]
-        cube[0] = self.priors["ra_offset"].draw_samples(1)[0]
-        cube[1] = self.priors["dec_offset"].draw_samples(1)[0]
+        cube = np.asarray(unit_cube, dtype=float).copy()
 
-        # Parallax (mas)
-        # Default: uniform [0, 100]
-        cube[2] = self.priors["parallax"].draw_samples(1)[0]
-
-        # Proper motion (mas/yr)
-        # Default: uniform [-50, 50]
-        cube[3] = self.priors["pmra"].draw_samples(1)[0]
-        cube[4] = self.priors["pmdec"].draw_samples(1)[0]
-
-        # Period (days)
-        # Default: log-uniform [log10(1e1), log10(5)]
-        cube[5] = self.priors["per"].draw_samples(1)[0]
-
-        # Eccentricity
-        # Default: uniform [0, 1]
-        cube[6] = self.priors["ecc"].draw_samples(1)[0]
-
-        # Epoch of periastron
-        # Default: uniform [0, 1]
-        cube[7] = self.priors["tau"].draw_samples(1)[0]
-
-        # Semi-major axis of photocenter (mas)
-        # Default: log-uniform [log10(1e-3), log10(2)]
-        cube[8] = self.priors["sma"].draw_samples(1)[0]
-
-        # Inclination (rad)
-        # Default: isotropic -> i = arccos(1 - 2u)
-        cube[9] = self.priors["inc"].draw_samples(1)[0]
-
-        # Argument of periastron (rad)
-        # Default: uniform [0, 2π]
-        cube[10] = self.priors["aop"].draw_samples(1)[0]
-
-        # Position angle of ascending node (rad)
-        # Default: uniform [0, 2π]
-        cube[11] = self.priors["pan"].draw_samples(1)[0]
+        for param_name, param_idx in self.param_indices.items():
+            cube[param_idx] = self.priors[param_name].transform_samples(
+                np.array([cube[param_idx]])
+            )[0]
 
         return cube
 
@@ -271,7 +290,7 @@ class NestedSampler:
         res = self.data_table["centroid_pos_al"] - delta_eta
         var = self.data_table["centroid_pos_error_al"] ** 2
 
-        return -0.5 * np.sum(res**2 / var)
+        return -0.5 * np.sum(res**2 / var + np.log(2.0 * np.pi * var))
 
     @beartype
     def run_multinest(
@@ -416,7 +435,11 @@ class NestedSampler:
                 None
             """
 
-            self.prior_transform(cube)
+            unit_cube = np.array([cube[i] for i in range(n_dim)])
+            transformed = self.prior_transform(unit_cube)
+
+            for i in range(n_dim):
+                cube[i] = transformed[i]
 
         @beartype
         def log_like_multinest(params, n_dim: int, n_param: int) -> Real:
@@ -500,6 +523,7 @@ class NestedSampler:
                 "data_table": self.data_table,
                 "primary_mass": self.primary_mass,
                 "epoch_astrometry": self.epoch_astrometry,
+                "param_indices": self.param_indices,
             }
 
             with open(pickle_file, "wb") as open_file:
@@ -508,6 +532,7 @@ class NestedSampler:
     @beartype
     def run_dynesty(
         self,
+        pickle_file: str = "exogaia.pkl",
         n_live_points: int = 500,
         resume: bool = False,
         output_folder: str = "dynesty/",
@@ -529,6 +554,9 @@ class NestedSampler:
 
         Parameters
         ----------
+        pickle_file : str
+            Output file name in which the results will be stored.
+            The output file is a Pickle file.
         n_live_points : int
             Number of live points used for the nested sampling.
         resume : bool
@@ -555,7 +583,7 @@ class NestedSampler:
             <https://dynesty.readthedocs.io/en/stable/
             quickstart.html#nested-sampling-with-dynesty>`_ used
             to propose new live points
-        n_pool : int
+        n_pool : int, None
             The number of processes for the local multiprocessing. The
             parameter is not used when the argument is set to ``None``.
         mpi_pool : bool
@@ -779,11 +807,17 @@ class NestedSampler:
                     resume=resume,
                 )
 
-        # Samples and ln(L)
-
         results = dsampler.results
-        samples = results.samples_equal()
-        ln_like = results.logl
+        weights = results.importance_weights()
+
+        # Resampled, equal-weight posterior
+        posterior = resample_equal(
+            np.column_stack([results.samples, results.logl]),
+            weights,
+        )
+
+        samples = posterior[:, :-1]
+        ln_like = posterior[:, -1]
 
         print(f"\nSamples shape: {samples.shape}")
         print(f"Number of iterations: {results.niter}")
@@ -793,27 +827,16 @@ class NestedSampler:
         np.savetxt(out_file, np.c_[samples, ln_like])
 
         # Nested sampling log-evidence
-
         self.ln_z = results.logz[-1]
         self.ln_z_error = results.logzerr[-1]
-        print(f"\nln(Z) = {self.ln_z:.2f} +/- {self.ln_z_error:.2f}")
 
-        # Get the sample with the maximum likelihood
+        print(f"\nln(Z) = {self.ln_z:.2f} " f"+/- {self.ln_z_error:.2f}")
 
-        max_idx = np.argmax(ln_like)
-        max_lnlike = ln_like[max_idx]
-        # best_params = samples[max_idx]
+        # Maximum-likelihood sample from the original nested samples
 
-        print("\nSample with the maximum likelihood:")
-        print(f"   - ln(L) = {max_lnlike:.2f}")
-
-        # param_check = {}
-        # for param_idx, param_item in enumerate(best_params):
-        #     param_check[self.modelpar[param_idx]] = param_item
-        #     if -0.1 < param_item < 0.1:
-        #         print(f"   - {self.modelpar[param_idx]} = {param_item:.2e}")
-        #     else:
-        #         print(f"   - {self.modelpar[param_idx]} = {param_item:.2f}")
+        # max_idx = np.argmax(results.logl)
+        # max_lnlike = results.logl[max_idx]
+        # best_param = results.samples[max_idx]
 
         # Get the MPI rank of the process
 
@@ -825,6 +848,22 @@ class NestedSampler:
         except ImportError:
             mpi_rank = 0
 
+        # Save results to pickle
+
+        if mpi_rank == 0:
+            pickle_data = {
+                "samples": samples,
+                "ln_like": ln_like,
+                "ln_z": (self.ln_z, self.ln_z_error),
+                "data_table": self.data_table,
+                "primary_mass": self.primary_mass,
+                "epoch_astrometry": self.epoch_astrometry,
+                "param_indices": self.param_indices,
+            }
+
+            with open(pickle_file, "wb") as open_file:
+                pickle.dump(pickle_data, open_file, protocol=pickle.HIGHEST_PROTOCOL)
+
 
 class MCMCSampler:
     """
@@ -833,7 +872,10 @@ class MCMCSampler:
 
     @beartype
     def __init__(
-        self, epoch_astrometry: EpochAstrometry, least_squares: LeastSquares
+        self,
+        epoch_astrometry: EpochAstrometry,
+        least_squares: LeastSquares,
+        restrict_node: bool = False,
     ) -> None:
         """
         Parameters
@@ -845,6 +887,10 @@ class MCMCSampler:
             ``:func:`~exogaia.leastsq.LeastSquares.orbit_fit```
             such that the ``best_param`` attribute contains
             the best-fit parameters from the least-squares fit.
+        restrict_node : bool
+            If ``True``, restrict the position angle of the
+            ascending node to [0, 180) deg to remove the
+            180 deg degeneracy without radial velocity.
 
         Returns
         -------
@@ -858,6 +904,7 @@ class MCMCSampler:
         self.data_table = epoch_astrometry.data_table
         self.primary_mass = epoch_astrometry.primary_mass
         self.least_squares = least_squares
+        self.restrict_node = restrict_node
 
         self.output_folder = None
 
@@ -907,67 +954,111 @@ class MCMCSampler:
             None
         """
 
-        self.priors["ra_offset"] = NormalPrior(self.least_squares.best_param[0], 0.1)
-        self.priors["dec_offset"] = NormalPrior(self.least_squares.best_param[1], 0.1)
-
-        self.priors["parallax"] = NormalPrior(
-            self.least_squares.best_param[2], 0.1, truncate_zero=True
-        )
-
-        self.priors["pmra"] = NormalPrior(self.least_squares.best_param[3], 0.1)
-        self.priors["pmdec"] = NormalPrior(self.least_squares.best_param[4], 0.1)
-
         if (
-            len(self.least_squares.best_param) == 12
-            and self.least_squares.param_cov is not None
+            self.least_squares is None
+            or self.least_squares.best_param is None
+            or self.least_squares.param_cov is None
         ):
-            param_sig = np.sqrt(np.diag(self.least_squares.param_cov))
+            best_param = None
+            param_cov = None
+
+        else:
+            best_param = self.least_squares.best_param
+            param_cov = self.least_squares.param_cov
+
+        # Default stellar track priors
+
+        self.priors["ra_offset"] = UniformPrior(-100.0, 100.0)
+        self.priors["dec_offset"] = UniformPrior(-100.0, 100.0)
+        self.priors["parallax"] = UniformPrior(0.0, 100.0)
+        self.priors["pmra"] = UniformPrior(-200.0, 200.0)
+        self.priors["pmdec"] = UniformPrior(-200.0, 200.0)
+
+        # Default orbit priors
+
+        self.priors["per"] = LogUniformPrior(1e1, 5e3)
+        self.priors["ecc"] = UniformPrior(0.0, 1.0)
+        self.priors["tau"] = UniformPrior(0.0, 1.0)
+        self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
+        self.priors["inc"] = SinPrior()
+        self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
+
+        if self.restrict_node:
+            self.priors["pan"] = UniformPrior(0.0, np.pi)
+        else:
+            self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
+
+        # Use the least-squares solution for the astrometric priors
+
+        if best_param is not None:
+            self.priors["ra_offset"] = NormalPrior(best_param[0], 0.1)
+            self.priors["dec_offset"] = NormalPrior(best_param[1], 0.1)
+            self.priors["parallax"] = NormalPrior(
+                best_param[2], 0.1, truncate_zero=True
+            )
+            self.priors["pmra"] = NormalPrior(best_param[3], 0.1)
+            self.priors["pmdec"] = NormalPrior(best_param[4], 0.1)
+
+        # Use the orbital least-squares solution when its covariance is available
+
+        if best_param is not None and len(best_param) == 12 and param_cov is not None:
+            param_cov = np.asarray(param_cov)
+
+            if param_cov.shape != (12, 12):
+                raise ValueError(
+                    "The covariance matrix of a 12-parameter orbital fit "
+                    f"should have shape (12, 12), not {param_cov.shape}."
+                )
+
+            param_var = np.diag(param_cov)
+            param_sig = np.sqrt(param_var)
 
             self.priors["per"] = NormalPrior(
-                self.least_squares.best_param[5], param_sig[5], truncate_zero=True
+                best_param[5],
+                param_sig[5],
+                truncate_zero=True,
             )
+
             self.priors["ecc"] = NormalPrior(
-                self.least_squares.best_param[6],
+                best_param[6],
                 param_sig[6],
                 truncate_zero=True,
                 truncate_upper=1.0,
             )
+
             self.priors["tau"] = NormalPrior(
-                self.least_squares.best_param[7],
+                best_param[7],
                 param_sig[7],
                 truncate_zero=True,
                 truncate_upper=1.0,
             )
+
             self.priors["sma"] = NormalPrior(
-                self.least_squares.best_param[8], param_sig[8], truncate_zero=True
+                best_param[8],
+                param_sig[8],
+                truncate_zero=True,
             )
+
             self.priors["inc"] = NormalPrior(
-                self.least_squares.best_param[9],
+                best_param[9],
                 param_sig[9],
                 truncate_zero=True,
                 truncate_upper=np.pi,
             )
+
             self.priors["aop"] = NormalPrior(
-                self.least_squares.best_param[10],
+                best_param[10],
                 param_sig[10],
                 truncate_zero=True,
                 truncate_upper=2.0 * np.pi,
             )
+
             self.priors["pan"] = NormalPrior(
-                self.least_squares.best_param[11],
+                best_param[11],
                 param_sig[11],
                 truncate_zero=True,
                 truncate_upper=2.0 * np.pi,
             )
-
-        else:
-            self.priors["per"] = LogUniformPrior(1e1, 1e5)
-            self.priors["ecc"] = UniformPrior(0.0, 1.0)
-            self.priors["tau"] = UniformPrior(0.0, 1.0)
-            self.priors["sma"] = LogUniformPrior(1e-3, 100.0)
-            self.priors["inc"] = SinPrior()
-            self.priors["aop"] = UniformPrior(0.0, 2.0 * np.pi)
-            self.priors["pan"] = UniformPrior(0.0, 2.0 * np.pi)
 
     @beartype
     def log_prior(self, params: np.ndarray) -> Real:
@@ -995,41 +1086,41 @@ class MCMCSampler:
                     params[param_idx] < self.priors[param_item].min_val
                     or params[param_idx] > self.priors[param_item].max_val
                 ):
-                    log_prior += -np.inf
+                    return -np.inf
 
             elif isinstance(self.priors[param_item], LogUniformPrior):
                 if (
                     params[param_idx] < 10.0 ** self.priors[param_item].log_min
                     or params[param_idx] > 10.0 ** self.priors[param_item].log_max
                 ):
-                    log_prior += -np.inf
+                    return -np.inf
+
+                log_prior -= np.log(params[param_idx])
 
             elif isinstance(self.priors[param_item], NormalPrior):
                 if self.priors[param_item].truncate_zero and params[param_idx] < 0.0:
-                    log_prior += -np.inf
+                    return -np.inf
 
-                elif (
+                if (
                     self.priors[param_item].truncate_upper is not None
                     and params[param_idx] > self.priors[param_item].truncate_upper
                 ):
-                    log_prior += -np.inf
+                    return -np.inf
 
-                else:
-                    log_prior += (
-                        -0.5
-                        * (
-                            (params[param_idx] - self.priors[param_item].mu)
-                            / self.priors[param_item].sigma
-                        )
-                        ** 2
+                log_prior += (
+                    -0.5
+                    * (
+                        (params[param_idx] - self.priors[param_item].mu)
+                        / self.priors[param_item].sigma
                     )
+                    ** 2
+                )
 
             elif isinstance(self.priors[param_item], SinPrior):
                 if params[param_idx] <= 0.0 or params[param_idx] >= np.pi:
-                    log_prior += -np.inf
+                    return -np.inf
 
-                else:
-                    log_prior += np.log(np.sin(params[param_idx]))
+                log_prior += np.log(np.sin(params[param_idx]))
 
             else:
                 raise ValueError(self.priors[param_item])
@@ -1070,7 +1161,7 @@ class MCMCSampler:
         res = self.data_table["centroid_pos_al"] - delta_eta
         var = self.data_table["centroid_pos_error_al"] ** 2
 
-        return -0.5 * np.sum(res**2 / var)
+        return -0.5 * np.sum(res**2 / var + np.log(2.0 * np.pi * var))
 
     @beartype
     def log_probability(self, params: np.ndarray) -> typing.Tuple[Real, Real]:
@@ -1094,7 +1185,6 @@ class MCMCSampler:
         """
 
         log_prior = self.log_prior(params)
-        print(log_prior)
 
         if np.isfinite(log_prior):
             log_prob = log_prior + self.log_likelihood(params)
@@ -1124,7 +1214,7 @@ class MCMCSampler:
         n_steps : int
             Number of steps that each walker will make.
         progress : bool
-            Display progress bar (default: False).
+            Display progress bar (default: True).
 
         Returns
         -------
@@ -1161,6 +1251,7 @@ class MCMCSampler:
             "data_table": self.data_table,
             "primary_mass": self.primary_mass,
             "epoch_astrometry": self.epoch_astrometry,
+            "param_indices": self.param_indices,
         }
 
         with open(pickle_file, "wb") as open_file:
@@ -1194,7 +1285,7 @@ class MCMCSampler:
         n_sweeps : int
             Number of sweeps to run.
         progress : bool
-            Display progress bar (default: False).
+            Display progress bar (default: True).
 
         Returns
         -------
@@ -1214,7 +1305,8 @@ class MCMCSampler:
 
         init_pos = np.zeros((n_temps, n_walkers, self.n_params))
         for param_item, param_idx in self.param_indices.items():
-            init_pos[:, :, param_idx] = self.priors[param_item].draw_samples(n_walkers)
+            init_samples = self.priors[param_item].draw_samples(n_temps * n_walkers)
+            init_pos[:, :, param_idx] = init_samples.reshape(n_temps, n_walkers)
 
         sampler.run_mcmc(
             initial_state=init_pos, nsteps=n_steps, nsweeps=n_sweeps, progress=progress
@@ -1222,9 +1314,15 @@ class MCMCSampler:
 
         sampler.get_autocorr_time(quiet=True)
 
-        samples = sampler.get_chain(flat=False, thin=1, discard=0)
-        # log_prob = sampler.get_log_prob(flat=False, thin=1, discard=0)
-        log_like = sampler.get_log_like(flat=False, thin=1, discard=0)
+        # Get the chains and log-likelihood
+
+        samples_all = sampler.get_chain(flat=False, thin=1, discard=0)
+        log_like_all = sampler.get_log_like(flat=False, thin=1, discard=0)
+
+        # Select the coldest chain for the posterior
+
+        samples = samples_all[0]
+        log_like = log_like_all[0]
 
         # Save results to pickle
 
@@ -1235,6 +1333,7 @@ class MCMCSampler:
             "data_table": self.data_table,
             "primary_mass": self.primary_mass,
             "epoch_astrometry": self.epoch_astrometry,
+            "param_indices": self.param_indices,
         }
 
         with open(pickle_file, "wb") as open_file:

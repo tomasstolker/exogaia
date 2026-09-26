@@ -10,7 +10,7 @@ import numpy as np
 
 from astropy import constants as c
 from astropy import units as u
-from astropy.coordinates import get_body_barycentric, SkyCoord
+from astropy.coordinates import get_body_barycentric
 from astropy.coordinates.representation.cartesian import CartesianRepresentation
 from astropy.time import Time
 from beartype import beartype, typing
@@ -143,16 +143,15 @@ class StarModel:
         Returns
         -------
         np.ndarray
-            Array with the RA coordinates (mas) relative to the
-            RA coordinate at ``ref_epoch``.
+            Array with the RA coordinates (mas) relative to
+            the RA coordinate at ``ref_epoch``.
         np.ndarray
-            Array with the Dec coordinates (mas) relative to the
-            Dec coordinate at ``ref_epoch``.
+            Array with the Dec coordinates (mas) relative to
+            the Dec coordinate at ``ref_epoch``.
         np.ndarray
-            Array with the 1D projected positions (mas). Will only
-            be returned if the size of ``obs_time`` is equal to the
-            size of ``self.data_table["sin_scan_ang"]`` and
-            ``self.data_table["cos_scan_ang"]``.
+            Array with the 1D projected positions (mas).
+            Returned only when ``obs_time`` is ``None``.
+            Otherwise ``None`` is returned.
         """
 
         if self.verbose:
@@ -177,11 +176,6 @@ class StarModel:
 
         rel_year = obs_time - self.ref_epoch.tcb.jyear
 
-        # RA and Dec coordinates
-
-        ra_coord = self.ra_ref + model_param["ra_offset"]
-        dec_coord = self.dec_ref + model_param["dec_offset"]
-
         # Position of the satellite relative to the Solar System
         # barycenter at each observation time.
         # TODO See Wright & Howard (2009)
@@ -199,21 +193,21 @@ class StarModel:
                 f"The data type of epoch astrometry is not supported: {data_type}"
             )
 
-        sat_pos = sat_pos.xyz.to_value()
+        sat_pos = sat_pos.xyz.to_value(u.au)
 
         # Tangent plane unit vectors on the sky
         # Local directions of increasing RA and Dec
         # at the source position, projected onto the sky
 
         alpha_hat = np.array(
-            [-np.sin(np.radians(ra_coord)), np.cos(np.radians(ra_coord)), 0.0]
+            [-np.sin(np.radians(self.ra_ref)), np.cos(np.radians(self.ra_ref)), 0.0]
         )
 
         delta_hat = np.array(
             [
-                -np.cos(np.radians(ra_coord)) * np.sin(np.radians(dec_coord)),
-                -np.sin(np.radians(ra_coord)) * np.sin(np.radians(dec_coord)),
-                np.cos(np.radians(dec_coord)),
+                -np.cos(np.radians(self.ra_ref)) * np.sin(np.radians(self.dec_ref)),
+                -np.sin(np.radians(self.ra_ref)) * np.sin(np.radians(self.dec_ref)),
+                np.cos(np.radians(self.dec_ref)),
             ]
         )
 
@@ -314,8 +308,9 @@ class StarModel:
             ``parallax`` (mas), ``pm_ra`` (mas/yr), and ``pm_dec``
             (mas/yr). The optional parameters are the acceleration
             parameters ``pm_dot_ra`` (mas/yr^2) and ``pm_dot_dec``
-            (mas/yr^2). In that case, also the derivative on the
-            acceleration, ``pm_dotdot_ra`` (mas/yr^3) and
+            (mas/yr^2). The acceleration derivatives ``pm_dotdot_ra``
+            (mas/yr^3) and ``pm_dotdot_dec`` (mas/yr^3) can also be
+            included.
         calc_parallax : bool
             Calculate the parallax effect or use the parallax
             factors from Gaia/Hipparcos (default: False). The latter
@@ -349,8 +344,8 @@ class StarModel:
         # Model parameters
 
         if calc_parallax:
-            # This function calculates the effect from the parallax,
-            # but ignores higher order effects.
+            # This function calculates the effect from the
+            # parallax, but ignores higher order effects.
 
             _, _, delta_pos = self.calc_2d_model(model_param, obs_time=None)
 
@@ -372,8 +367,14 @@ class StarModel:
             # Add accelerations components
 
             if "pm_dot_ra" in model_param and "pm_dot_dec" in model_param:
-                delta_pos += 0.5 * rel_year**2 * model_param["pm_dot_ra"]
-                delta_pos += 0.5 * rel_year**2 * model_param["pm_dot_dec"]
+                delta_pos += (
+                    0.5
+                    * rel_year**2
+                    * (
+                        model_param["pm_dot_ra"] * sin_scan_ang
+                        + model_param["pm_dot_dec"] * cos_scan_ang
+                    )
+                )
 
                 if self.verbose:
                     print(
@@ -384,8 +385,14 @@ class StarModel:
                     )
 
             if "pm_dotdot_ra" in model_param and "pm_dotdot_dec" in model_param:
-                delta_pos += (1.0 / 6.0) * rel_year**3 * model_param["pm_dotdot_ra"]
-                delta_pos += (1.0 / 6.0) * rel_year**3 * model_param["pm_dotdot_dec"]
+                delta_pos += (
+                    (1.0 / 6.0)
+                    * rel_year**3
+                    * (
+                        model_param["pm_dotdot_ra"] * sin_scan_ang
+                        + model_param["pm_dotdot_dec"] * cos_scan_ang
+                    )
+                )
 
                 if self.verbose:
                     print(
@@ -471,6 +478,14 @@ class KeplerModel:
             Array with :math:`y` coordinates in the orbital plane,
             in units of the semi-major axis.
         """
+
+        if per <= 0.0:
+            raise ValueError("The period parameter, 'per', should be positive.")
+
+        if ecc < 0.0 or ecc >= 1.0:
+            raise ValueError(
+                "The eccentricity parameter, 'ecc', should satisfy 0 <= ecc < 1."
+            )
 
         if obs_time is None:
             rel_time_day = self.data_table["relative_time_day"].to_numpy()
@@ -733,12 +748,11 @@ class KeplerModel:
     ) -> np.ndarray:
         """
         Calculate the astrometry of the combined stellar track and
-        Kepler orbit. The observation epochs and scan angles that
-        are stored in the ``data_table`` of ``epoch_astrometry``
-        will be used, so it is not possible to calculate epoch
-        astrometry of arbitrary observation epochs. For that
-        purpose, :class:`~exogaia.models.StarModel.calc_2d_model`
-        should be used.
+        Kepler orbit. The observation epochs and scan angles stored in
+        the ``data_table`` of ``epoch_astrometry`` are used, so this
+        method cannot calculate astrometry at arbitrary observation
+        epochs. For that purpose, use
+        :class:`~exogaia.models.KeplerModel.calc_2d_model`.
 
         Parameters
         ----------
@@ -892,16 +906,15 @@ class KeplerModel:
 
         Parameters
         ----------
-        model_param : list(float), np.ndarray
-            List or array with the model parameters, in the following
-            order:  RA offset (mas), Dec offset (mas), parallax (mas),
-            RA proper motion (mas/yr), Dec proper motion (mas/yr),
-            period (days), eccentricity, relative time of periastron,
-            semi-major axis (mas), inclination (rad), argument of
-            periastron (rad), position angle of ascending node (rad).
+        model_param : dict
+            Dictionary with the stellar and orbital model parameters:
+            ``ra_offset`` (mas), ``dec_offset`` (mas), ``parallax`` (mas),
+            ``pm_ra`` (mas/yr), ``pm_dec`` (mas/yr), ``per`` (days),
+            ``ecc``, ``tau``, ``sma`` (mas), ``inc`` (rad), ``aop`` (rad),
+            and ``pan`` (rad).
         plot_file : str, None
-            File name for the output plot. The plot is shown
-            instead of stored if the arguments is set to ``None``.
+            File name for the output plot. The plot is shown instead of
+            saved if the argument is set to ``None``.
 
         Returns
         -------
@@ -925,11 +938,10 @@ class KeplerModel:
 
         # Full orbit model with 1000 steps
 
-        yr_start = self.ref_epoch
-        yr_end = self.ref_epoch + (model_param["per"] / 365.25) * u.yr
+        yr_start = self.ref_epoch.tcb.jyear
+        yr_end = (self.ref_epoch + model_param["per"] * u.day).tcb.jyear
 
         obs_time_full = np.linspace(yr_start, yr_end, 1000)
-        obs_time_full = obs_time_full.tcb.jyear
 
         # 2D orbit of the photocenter
 
@@ -1046,7 +1058,7 @@ class KeplerModel:
             label="Barycenter",
         )
 
-        # Plot periastron and line of nodes
+        # Plot periastron and line of apsides
 
         plt.plot(
             delta_ra_per,
@@ -1067,7 +1079,7 @@ class KeplerModel:
             lw=1,
             marker="none",
             color="tab:gray",
-            label="Line of nodes",
+            label="Line of apsides",
         )
 
         plt.xlabel(r"$\Delta$RA (mas)")

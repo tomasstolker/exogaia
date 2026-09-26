@@ -3,10 +3,6 @@
 Installation
 ============
 
-``exogaia`` is currently a private repository on `Github <https://github.com/tomasstolker/exogaia>`_, but will be publicly released in the future. Interested to use the code already? Please :ref:`send an email <about>` with a request to be included as collaborator in the Github repo.
-
-The following installation instructions are for future purpose and don't work yet.
-
 Installation from PyPI
 ----------------------
 
@@ -58,7 +54,7 @@ New commits can be pulled from Github once a local copy of the repository exists
 Do you want to make changes to the code? Please fork the `exogaia` repository on the Github page and clone your own fork instead of the main repository. Contributions and pull requests are welcome (see :ref:`about` section).
 
 Testing `exogaia`
-------------------
+-----------------
 
 The installation can now be tested, for example by starting Python in interactive mode and importing the package:
 

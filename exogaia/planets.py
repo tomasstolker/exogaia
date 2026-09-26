@@ -12,6 +12,7 @@ import numpy as np
 
 from astropy import units as u
 from beartype import beartype, typing
+from scipy.stats import poisson
 
 from exogaia.utils import print_section
 
@@ -33,8 +34,8 @@ class OccurrenceRate:
         self,
         primary_mass: typing.Union[Real, np.ndarray],
         occ_rate: typing.Union[str, typing.Callable] = "cls_fulton2021",
-        sma_range: typing.Tuple[Real, Real] = None,
-        mass_range: typing.Tuple[Real, Real] = None,
+        sma_range: typing.Optional[typing.Tuple[Real, Real]] = None,
+        mass_range: typing.Optional[typing.Tuple[Real, Real]] = None,
         verbose: bool = True,
     ) -> None:
         """
@@ -48,7 +49,7 @@ class OccurrenceRate:
             Or, a function can be provided as argument, which should
             calculate the occurrence rate as function of semi-major
             axis (au), companion mass (Mjup), and primary mass (Msun),
-            so in the from ``occ_rate(sma, mass_planet, mass_star)``
+            so in the form ``occ_rate(sma, mass_planet, mass_star)``
         sma_range : tuple(float, float), None
             Allowed semi-major axis range (au) in case the argument
             of ``occ_rate`` is a callable. Otherwise, the argument
@@ -71,10 +72,15 @@ class OccurrenceRate:
         if self.verbose:
             print_section("Occurrence rate", bound_char="=")
 
-        if isinstance(primary_mass, np.ndarray):
-            self.primary_mass = primary_mass
-        else:
-            self.primary_mass = np.array([primary_mass])
+        self.primary_mass = np.atleast_1d(primary_mass).astype(float)
+
+        if self.primary_mass.ndim != 1:
+            raise ValueError(
+                "'primary_mass' should be a scalar or one-dimensional array"
+            )
+
+        if np.any(~np.isfinite(self.primary_mass)) or np.any(self.primary_mass <= 0.0):
+            raise ValueError("'primary_mass' should contain finite positive values")
 
         occ_list = ["cls_fulton2021", "gpi_nielsen2019"]
 
@@ -106,9 +112,33 @@ class OccurrenceRate:
                 )
 
         else:
+            if sma_range is None or mass_range is None:
+                raise ValueError(
+                    "'sma_range' and 'mass_range' should be provided "
+                    "when 'occ_rate' is a callable."
+                )
+
             self.sma_range = sma_range
             self.mass_range = mass_range
             self.occ_rate = occ_rate
+
+        if (
+            not np.all(np.isfinite(self.sma_range))
+            or self.sma_range[0] <= 0.0
+            or self.sma_range[0] >= self.sma_range[1]
+        ):
+            raise ValueError(
+                "'sma_range' should contain two increasing finite " "positive values"
+            )
+
+        if (
+            not np.all(np.isfinite(self.mass_range))
+            or self.mass_range[0] <= 0.0
+            or self.mass_range[0] >= self.mass_range[1]
+        ):
+            raise ValueError(
+                "'mass_range' should contain two increasing finite " "positive values"
+            )
 
         if self.verbose:
             print(f"Occurrence rate: {self.occ_rate.__name__}")
@@ -146,17 +176,14 @@ class OccurrenceRate:
 
         cls_name = self.__class__.__name__
 
-        if self.primary_mass is None:
-            mass_str = "None"
+        if self.primary_mass.size == 1:
+            mass_str = f"{self.primary_mass[0]:.3f}"
         else:
-            if self.primary_mass.size == 1:
-                mass_str = f"{self.primary_mass[0]:.3f}"
-            else:
-                mass_str = (
-                    f"array[{self.primary_mass.size}]"
-                    f"[{np.nanmin(self.primary_mass):.2f}–"
-                    f"{np.nanmax(self.primary_mass):.2f}]"
-                )
+            mass_str = (
+                f"array[{self.primary_mass.size}]"
+                f"[{np.nanmin(self.primary_mass):.2f}–"
+                f"{np.nanmax(self.primary_mass):.2f}]"
+            )
 
         occ_name = (
             self.occ_rate.__name__ if callable(self.occ_rate) else str(self.occ_rate)
@@ -191,8 +218,8 @@ class OccurrenceRate:
             sig = inspect.signature(func)
 
             @wraps(func)
-            def wrapper(*args):
-                bound = sig.bind(*args)
+            def wrapper(*args, **kwargs):
+                bound = sig.bind(*args, **kwargs)
                 bound.apply_defaults()
 
                 def check_range(name, rng):
@@ -200,13 +227,14 @@ class OccurrenceRate:
                         arr = np.asarray(bound.arguments[name])
                         if not np.all((arr >= rng[0]) & (arr <= rng[1])):
                             warnings.warn(
-                                f"{name} is outside the " f"supported range {rng}"
+                                f"{name} is outside the supported range {rng}",
+                                stacklevel=2,
                             )
 
                 check_range("sma", sma_range)
                 check_range("mass_planet", mass_range)
 
-                return func(*args)
+                return func(*args, **kwargs)
 
             return wrapper
 
@@ -231,6 +259,9 @@ class OccurrenceRate:
         float
             Total expected number of planets per star.
         """
+
+        if not np.isfinite(mass_star) or mass_star <= 0.0:
+            raise ValueError("'mass_star' should be finite and positive")
 
         # Bin edges
 
@@ -263,154 +294,224 @@ class OccurrenceRate:
 
         # Integrate occurrence grid over log(Mp) and log(sma)
 
-        int_mass = np.trapezoid(self.occ_grid, self.log_mass_mid, axis=1)
-        occ_int = np.trapezoid(int_mass, self.log_sma_mid, axis=0)
+        dlog_sma = np.diff(self.log_sma_edges)
+        dlog_mass = np.diff(self.log_mass_edges)
+
+        occ_int = np.sum(self.occ_grid * dlog_sma[:, None] * dlog_mass[None, :])
 
         return occ_int
 
     @beartype
     def sample_planets(
         self,
-        allow_reject: bool = True,
+        require_planet: bool = False,
         seed: typing.Optional[int] = None,
-    ) -> typing.Tuple[np.ndarray, np.ndarray]:
+    ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Draw a synthetic planet population for the current stellar sample.
 
-        For each star in ``self.primary_mass``, this method:
+        For each star, the occurrence-rate density is integrated over the
+        adopted semi-major axis and companion-mass range to obtain the
+        expected number of planets. The actual number of planets is drawn
+        from a Poisson distribution with this expectation value.
 
-        1. Computes the integrated planet occurrence rate over the defined
-           semi-major axis and mass grid using ``integrate_occ_rate``.
-        2. Performs a Bernoulli trial with success probability equal to the
-           integrated occurrence rate (if ``allow_reject=True``).
-        3. If the star is assigned a planet, samples its semi-major axis and
-           mass from the discretized occurrence surface
-           ``self.occ_grid``, which represents
+        Planet properties are sampled from the occurrence-rate density
 
-               d²N / (d ln a d ln M),
+            d^2N / (d ln(a) d ln(M_p)).
 
-           defined on a logarithmic (a, M) grid.
-
-        The 2D occurrence surface is converted into a normalized
-        discrete probability distribution by multiplying by the
-        bin widths in ln(a) and ln(M). Sampling proceeds as:
-
-            - First, a semi-major axis bin is drawn from the marginalized
-              distribution over ln(a).
-            - Then, a mass bin is drawn from the conditional distribution
-              over ln(M) at fixed ln(a).
-            - Finally, values are drawn uniformly within the selected
-              logarithmic bins.
-
-        At most one planet is assigned per star, even if the integrated
-        occurrence rate exceeds unity.
+        Sampling is performed by first selecting a cell from the
+        discretized occurrence-rate grid according to its integrated
+        probability and then drawing uniformly in ln(a) and ln(M_p)
+        within that cell.
 
         Parameters
         ----------
-        allow_reject : bool
-            If ``True`` (default), each star hosts a planet with
-            probability equal to its integrated occurrence rate.
-            If ``False``, every star is forced to host exactly
-            one planet.
+        require_planet : bool
+            If ``False`` (default), the number of planets for each star
+            is drawn from the full Poisson distribution and can therefore
+            be zero. If ``True``, the number of planets is drawn from the
+            corresponding zero-truncated Poisson distribution, so every
+            star hosts at least one planet.
         seed : int, None
-            Seed for the random number generator. If ``None``
-            (default), a fresh random generator is used.
+            Seed for the random number generator. If ``None`` (default),
+            a fresh random generator is used.
 
         Returns
         -------
         np.ndarray
-            Semi-major axes (au). Entries are NaN for stars without
-            an assigned planet in case ``allow_reject=True``. The
-            array has the same length as ``self.primary_mass``.
+            Semi-major axes of the sampled planets (au).
         np.ndarray
-            Planet masses (Msun). Entries are NaN for stars without
-            an assigned planet in case ``allow_reject=True``. The
-            array has the same length as ``self.primary_mass``.
+            Masses of the sampled planets (Msun).
+        np.ndarray
+            Integer indices of the host stars in ``self.primary_mass``.
+            Multiple planets can therefore have the same host index.
         """
 
         if self.verbose:
             print_section("Sample planets")
-
             print(f"Number of stars: {self.primary_mass.size}")
 
         rng = np.random.default_rng(seed)
 
-        sma_list = np.full(self.primary_mass.size, np.nan)
-        mass_list = np.full(self.primary_mass.size, np.nan)
+        sma_samples = []
+        mass_samples = []
+        host_indices = []
 
         for star_idx, star_mass in enumerate(self.primary_mass):
-            # Only considering systems with 1 planet, even though
-            # occ_int can be larger than one, so on average more
-            # than one planet per star, for high stellar masses.
+            # Calculate the occurrence grid for this stellar mass
+            occ_int = float(self.integrate_occ_rate(star_mass))
 
-            occ_int = self.integrate_occ_rate(star_mass)
+            if not np.isfinite(occ_int):
+                raise ValueError(
+                    f"The integrated occurrence rate is not finite "
+                    f"for primary mass {star_mass:.3f} Msun."
+                )
 
-            if allow_reject:
-                ran_num = rng.random()
+            if occ_int < 0.0:
+                raise ValueError(
+                    f"The integrated occurrence rate is negative "
+                    f"({occ_int:.3e}) for primary mass "
+                    f"{star_mass:.3f} Msun."
+                )
+
+            if self.occ_grid is None:
+                raise RuntimeError(
+                    "The occurrence-rate grid was not initialized by "
+                    "'integrate_occ_rate'."
+                )
+
+            if not np.all(np.isfinite(self.occ_grid)):
+                raise ValueError(
+                    f"The occurrence-rate grid contains non-finite values "
+                    f"for primary mass {star_mass:.3f} Msun."
+                )
+
+            if np.any(self.occ_grid < 0.0):
+                raise ValueError(
+                    f"The occurrence-rate grid contains negative values "
+                    f"for primary mass {star_mass:.3f} Msun."
+                )
+
+            # Integrated occurrence rate in each grid cell
+            dlog_sma = np.diff(self.log_sma_edges)
+            dlog_mass = np.diff(self.log_mass_edges)
+
+            cell_rate = self.occ_grid * dlog_sma[:, None] * dlog_mass[None, :]
+
+            rate_sum = float(np.sum(cell_rate))
+
+            if not np.isfinite(rate_sum) or rate_sum < 0.0:
+                raise ValueError(
+                    f"The integrated occurrence grid is invalid "
+                    f"for primary mass {star_mass:.3f} Msun."
+                )
+
+            # No planets can be drawn from a zero occurrence rate
+            if rate_sum == 0.0:
+                if require_planet:
+                    raise ValueError(
+                        "Cannot require a planet when the integrated "
+                        f"occurrence rate is zero for primary mass "
+                        f"{star_mass:.3f} Msun."
+                    )
+
+                continue
+
+            # Draw planet multiplicity
+            if require_planet:
+                # Draw from the Poisson distribution conditional on N >= 1
+                p_zero = np.exp(-rate_sum)
+                p_nonzero = -np.expm1(-rate_sum)
+
+                quantile = p_zero + p_nonzero * rng.random()
+                n_planets = int(poisson.ppf(quantile, mu=rate_sum))
+
+                # Guard against the exact lower numerical boundary
+                n_planets = max(1, n_planets)
+
             else:
-                ran_num = -np.inf
+                n_planets = int(rng.poisson(rate_sum))
 
-            if ran_num < occ_int:
-                # bin widths
+            if n_planets == 0:
+                continue
 
-                dlog_mass = np.diff(self.log_mass_edges)
-                dlog_sma = np.diff(self.log_sma_edges)
+            # Normalize the integrated cell rates to obtain sampling
+            # probabilities for the 2D occurrence-rate grid
+            cell_prob = cell_rate.ravel() / rate_sum
 
-                # Convert differential rate to integrated probability per bin
+            # Protect against tiny floating-point normalization errors
+            cell_prob /= cell_prob.sum()
 
-                occ_pdf = self.occ_grid * dlog_sma[:, None] * dlog_mass[None, :]
+            # Draw grid cells for all planets around this star
+            flat_idx = rng.choice(
+                cell_prob.size,
+                size=n_planets,
+                replace=True,
+                p=cell_prob,
+            )
 
-                # Normalize the PDF
-
-                occ_pdf /= occ_pdf.sum()
-
-                # Sample semi-major axis marginal
-
-                p_sma = occ_pdf.sum(axis=1)
-                cdf_sma = np.cumsum(p_sma)
-                i_sma = np.searchsorted(cdf_sma, rng.random())
-
-                # Sample mass conditional on semi-major aixs
-
-                p_mass_given_sma = occ_pdf[i_sma] / p_sma[i_sma]
-                cdf_mass = np.cumsum(p_mass_given_sma)
-                i_mass = np.searchsorted(cdf_mass, rng.random())
-
-                # Sample inside log(sma) and log(mass) bin
-
-                log_sma = rng.uniform(
-                    self.log_sma_edges[i_sma], self.log_sma_edges[i_sma + 1]
+            if self.occ_grid.ndim != 2:
+                raise RuntimeError(
+                    "Expected a 2D occurrence-rate grid, "
+                    f"got {self.occ_grid.ndim} dimensions."
                 )
 
-                log_mass = rng.uniform(
-                    self.log_mass_edges[i_mass], self.log_mass_edges[i_mass + 1]
-                )
+            grid_idx = np.unravel_index(
+                flat_idx,
+                self.occ_grid.shape,
+            )
 
-                sma_list[star_idx] = np.exp(log_sma)
-                mass_list[star_idx] = np.exp(log_mass)
+            sma_idx = grid_idx[0]
+            mass_idx = grid_idx[1]
 
-        # Convert from Mjup to Msun
+            # Draw uniformly within the selected logarithmic bins
+            log_sma = rng.uniform(
+                self.log_sma_edges[sma_idx],
+                self.log_sma_edges[sma_idx + 1],
+            )
 
-        mass_list = (mass_list * u.M_jup).to(u.M_sun).value
+            log_mass = rng.uniform(
+                self.log_mass_edges[mass_idx],
+                self.log_mass_edges[mass_idx + 1],
+            )
+
+            sma_samples.extend(np.exp(log_sma))
+            mass_samples.extend(np.exp(log_mass))
+            host_indices.extend([star_idx] * n_planets)
+
+        sma_samples = np.asarray(sma_samples, dtype=float)
+        mass_samples = np.asarray(mass_samples, dtype=float)
+        host_indices = np.asarray(host_indices, dtype=int)
+
+        # Convert companion masses from Mjup to Msun
+        mass_samples = (mass_samples * u.M_jup).to(u.M_sun).value
 
         if self.verbose:
-            print(f"Number of planets: {np.sum(~np.isnan(sma_list))}")
+            n_planets = sma_samples.size
+            n_systems = np.unique(host_indices).size
 
-            if len(sma_list) == 1:
-                print(f"\nSemi-major axis (au) = {sma_list[0]:.2f}")
-                print(f"Companion mass (Msun) = {mass_list[0]:.2e}")
+            print(f"Number of planets: {n_planets}")
+            print(f"Number of planetary systems: {n_systems}")
 
-            elif len(sma_list) > 1:
+            if n_planets > 0:
+                planet_counts = np.bincount(
+                    host_indices,
+                    minlength=self.primary_mass.size,
+                )
+
+                print("Maximum planet multiplicity: " f"{np.max(planet_counts)}")
                 print(
                     "\nSemi-major axis range (au) = "
-                    f"{np.nanmin(sma_list):.2f} - {np.nanmax(sma_list):.2f}"
+                    f"{np.min(sma_samples):.2f} - "
+                    f"{np.max(sma_samples):.2f}"
                 )
                 print(
                     "Companion mass range (Msun) = "
-                    f"{np.nanmin(mass_list):.2e} - {np.nanmax(mass_list):.2e}"
+                    f"{np.min(mass_samples):.2e} - "
+                    f"{np.max(mass_samples):.2e}"
                 )
 
-        return sma_list, mass_list
+        return sma_samples, mass_samples, host_indices
 
     @beartype
     @staticmethod
