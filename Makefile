@@ -44,6 +44,7 @@ clean:
 	rm -rf docs/_build/
 	rm -rf docs/tutorials/.ipynb_checkpoints/
 	rm -rf docs/tutorials/multinest/
+	rm -rf docs/tutorials/dynesty/
 	rm -f docs/tutorials/*.png
 	rm -f docs/tutorials/*.csv
 	rm -f docs/tutorials/exogaia.pkl

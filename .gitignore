@@ -4,6 +4,7 @@ exogaia/_version.py
 docs/_build/
 docs/tutorials/.ipynb_checkpoints/
 docs/tutorials/multinest/
+docs/tutorials/dynesty/
 docs/tutorials/exogaia.pkl
 docs/tutorials/*.png
 docs/tutorials/*.csv

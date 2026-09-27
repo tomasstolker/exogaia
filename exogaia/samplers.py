@@ -874,7 +874,7 @@ class MCMCSampler:
     def __init__(
         self,
         epoch_astrometry: EpochAstrometry,
-        least_squares: LeastSquares,
+        least_squares: typing.Optional[LeastSquares] = None,
         restrict_node: bool = False,
     ) -> None:
         """
@@ -882,11 +882,15 @@ class MCMCSampler:
         ----------
         epoch_astrometry : EpochAstrometry
             ``EpochAstrometry`` object that contains the data.
-        least_squares : LeastSquares
-            ``LeastSquares`` object after running
+        least_squares : LeastSquares, None
+            Optional ``LeastSquares`` object after running
             ``:func:`~exogaia.leastsq.LeastSquares.orbit_fit```
             such that the ``best_param`` attribute contains
             the best-fit parameters from the least-squares fit.
+            By setting this argument, normal priors based on
+            the least-squares results will be used. In general,
+            however, it is recommended to set the argument to
+            ``None`` to prevent biasing the posterior.
         restrict_node : bool
             If ``True``, restrict the position angle of the
             ascending node to [0, 180) deg to remove the

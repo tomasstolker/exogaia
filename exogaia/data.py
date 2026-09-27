@@ -577,7 +577,7 @@ class GaiaAstrometry(EpochAstrometry):
                         verbose=self.verbose,
                     )
 
-                sma, mass_2 = occ_rate.sample_planets(require_planet=require_planet)
+                sma, mass_2, _ = occ_rate.sample_planets(require_planet=require_planet)
 
                 sma = sma[0]
                 mass_2 = mass_2[0]
