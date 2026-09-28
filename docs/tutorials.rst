@@ -18,6 +18,9 @@ Below you can find tutorials that highlight the functionalities of ``exogaia``. 
 - :doc:`tutorials/binary_orbit`
   – Fit the epoch astrometry with an orbit model
 
+- :doc:`tutorials/partial_orbit`
+  – Inferring constraints from partial orbit
+
 - :doc:`tutorials/stellar_companion`
   – Simulate a non-dark stellar companion.
 
@@ -40,6 +43,7 @@ Below you can find tutorials that highlight the functionalities of ``exogaia``. 
    tutorials/single_star.ipynb
    tutorials/acceleration.ipynb
    tutorials/binary_orbit.ipynb
+   tutorials/partial_orbit.ipynb
    tutorials/stellar_companion.ipynb
    tutorials/gaia_bh3.ipynb
    tutorials/dr4_pre-release.ipynb

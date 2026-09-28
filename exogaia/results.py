@@ -10,10 +10,11 @@ from numbers import Real
 import matplotlib.pyplot as plt
 import numpy as np
 
+from astropy.time import Time
 from beartype import beartype, typing
 from corner import corner
 from matplotlib.figure import Figure
-from scipy.stats import norm
+from scipy.stats import gaussian_kde, norm
 
 from exogaia.models import KeplerModel
 from exogaia.utils import param_dict_to_list, param_list_to_dict, print_section
@@ -253,20 +254,12 @@ class SamplingResults:
 
             return None
 
-        if self.orig_samples.ndim == 4:
-            warnings.warn(
-                "A 4D parallel-tempering chain was found. "
-                "Only the cold chain will be plotted.",
-            )
-
-            samples_arr = np.copy(self.orig_samples[0])
-
-        elif self.orig_samples.ndim == 3:
+        if self.orig_samples.ndim == 3:
             samples_arr = np.copy(self.orig_samples)
 
         else:
             raise ValueError(
-                "Expected samples with 2, 3, or 4 dimensions, "
+                "Expected samples with 2 or dimensions, "
                 f"but received {self.orig_samples.ndim}."
             )
 
@@ -302,7 +295,7 @@ class SamplingResults:
                     alpha=0.3,
                 )
 
-                axs[param_idx].set_xlim(0.0, walk_track.size)
+                axs[param_idx].set_xlim(step_idx[0], step_idx[-1])
 
                 if param_idx == self.n_params - 1:
                     axs[param_idx].set_xlabel("Step number")
@@ -332,10 +325,10 @@ class SamplingResults:
         Parameters
         ----------
         truths : dict, None
-            Optional dictionary with the true parameter
-            values that will be included in the corner plot.
-            No truths are included in the plot if the argument
-            is set to ``None``.
+            Dictionary with the true parameter values that
+            will be included in the corner plot. No truths
+            are included in the plot if the argument is
+            set to ``None``.
         plot_file : str, None
             File name for the output plot. The plot is shown
             instead of stored if the argument is set to ``None``.
@@ -592,9 +585,9 @@ class SamplingResults:
             yerr=obs_err,
             ls="none",
             marker="s",
-            ms=5.0,
-            mew=1.2,
-            elinewidth=1.2,
+            ms=4.0,
+            mew=1.0,
+            elinewidth=1.0,
             color="goldenrod",
             ecolor="black",
             mec="black",
@@ -607,9 +600,9 @@ class SamplingResults:
             yerr=obs_err[0],
             ls="none",
             marker="s",
-            ms=5.0,
-            mew=1.2,
-            elinewidth=1.2,
+            ms=4.0,
+            mew=1.0,
+            elinewidth=1.0,
             color="tab:green",
             ecolor="black",
             mec="black",
@@ -622,9 +615,9 @@ class SamplingResults:
             yerr=obs_err[-1],
             ls="none",
             marker="s",
-            ms=5.0,
-            mew=1.2,
-            elinewidth=1.2,
+            ms=4.0,
+            mew=1.0,
+            elinewidth=1.0,
             color="tab:red",
             ecolor="black",
             mec="black",
@@ -654,25 +647,41 @@ class SamplingResults:
 
     @beartype
     def plot_orbit(
-        self, n_samples: int = 100, plot_file: typing.Optional[str] = None
+        self,
+        n_samples: int = 50,
+        truths: typing.Optional[typing.Dict[str, Real]] = None,
+        marker_time: typing.Optional[typing.Union[str, Time]] = None,
+        plot_file: typing.Optional[str] = None,
     ) -> Figure:
         """
-        Function for plotting the stellar orbit based on the
-        parameters with the maximum likelihood.
+        Plot the maximum-likelihood photocenter orbit together with
+        random orbits drawn from the posterior distribution.
 
         Parameters
         ----------
         n_samples : int
-            Number of random orbit samples to plot (default: 100).
+            Number of random posterior orbit samples to plot (default: 50).
+        truths : dict, None
+            Dictionary with the true model parameters. If provided, the
+            corresponding orbit is plotted together with the true position
+            at ``marker_time`` when specified. No true orbit or position is
+            plotted if set to ``None``.
+        marker_time : str, Time, None
+            Date and time at which to evaluate the orbital position. If
+            provided, the posterior distribution of the position on that
+            date are plotted. The true position is also plotted if
+            ``truths`` is provided. A string is interpreted as UTC and
+            converted to an ``astropy.time.Time`` object. No positions
+            at a specific epoch are plotted if set to ``None``.
         plot_file : str, None
-            File name for the output plot. The plot is shown
-            instead of stored if the argument is set to ``None``.
+            File name for the output plot. The plot is shown instead of
+            stored if the argument is set to ``None``.
 
         Returns
         -------
         Figure
-            The Matplotlib ``Figure`` object that can be used
-            for further adjustments of the plot.
+            The Matplotlib ``Figure`` object that can be used for further
+            adjustments of the plot.
         """
 
         # Epoch astrometry data
@@ -691,6 +700,11 @@ class SamplingResults:
         ax = plt.gca()
 
         rng = np.random.default_rng()
+
+        if n_samples <= 0:
+            raise ValueError("'n_samples' should be positive.")
+
+        n_samples = min(n_samples, self.samples.shape[0])
 
         sample_indices = rng.choice(
             self.samples.shape[0],
@@ -720,15 +734,41 @@ class SamplingResults:
                 delta_ra_sample,
                 delta_dec_sample,
                 lw=0.5,
-                alpha=0.1,
-                color="darkviolet",
-                zorder=0,
+                alpha=0.2,
+                color="dimgray",
+                zorder=1,
             )
+
+        # Orbit with true parameters
+
+        if truths is not None:
+            obs_time_truth = np.linspace(
+                self.ref_epoch.tcb.jyear,
+                self.ref_epoch.tcb.jyear + truths["per"] / 365.25,
+                10000,
+            )
+
+            delta_ra_truth, delta_dec_truth = kepler_model.calc_orbit(
+                truths,
+                obs_time=obs_time_truth,
+            )
+
+            plt.plot(
+                delta_ra_truth,
+                delta_dec_truth,
+                ls="-",
+                lw=0.7,
+                marker="none",
+                color="mediumaquamarine",
+                label="True orbit",
+                zorder=2,
+            )
+
+        # Orbit with maximum likelihood
 
         model_param = param_list_to_dict(best_param)
 
-        # period = np.sqrt(best_param[5] ** 3 / best_param[11]) * 365.25
-        # obs_time = np.linspace(0.0, period, 10000)
+        # Calculate full orbit for maximum-likelihood parameters
 
         obs_time_full = np.linspace(
             self.ref_epoch.tcb.jyear,
@@ -740,14 +780,99 @@ class SamplingResults:
             model_param, obs_time=obs_time_full
         )
 
+        # Plot orbit with maximum likelihood
+
         plt.plot(
             delta_ra_full,
             delta_dec_full,
             ls="-",
-            lw=1.5,
+            lw=1.0,
             marker="none",
             color="black",
+            zorder=1,
+            label="Maximum likelihood",
         )
+
+        # Position at time of periastron (in Julian years)
+
+        t_per = (
+            self.ref_epoch.tcb.jyear
+            + (model_param["per"] * model_param["tau"]) / 365.25
+        )
+
+        delta_ra_per, delta_dec_per = kepler_model.calc_orbit(
+            model_param,
+            obs_time=np.array([t_per]),
+        )
+
+        # Position at time of apastron (in Julian years)
+
+        period_years = model_param["per"] / 365.25
+
+        delta_ra_ap, delta_dec_ap = kepler_model.calc_orbit(
+            model_param,
+            obs_time=np.array([t_per + 0.5 * period_years]),
+        )
+
+        # Plot line of apsides
+
+        plt.plot(
+            [delta_ra_per, delta_ra_ap],
+            [delta_dec_per, delta_dec_ap],
+            ls=":",
+            lw=0.8,
+            marker="none",
+            color="tab:gray",
+            label="Line of apsides",
+            zorder=2,
+        )
+
+        # Signed distance perpendicular to the line of nodes
+
+        pan = model_param["pan"]
+        node_perp = delta_ra_full * np.cos(pan) - delta_dec_full * np.sin(pan)
+
+        # Find the two crossings of the orbit with the line of nodes
+
+        cross_idx = np.where(node_perp[:-1] * node_perp[1:] < 0.0)[0]
+
+        # Linear interpolation to the exact crossing
+
+        node_points = []
+
+        for idx in cross_idx:
+            frac = -node_perp[idx] / (node_perp[idx + 1] - node_perp[idx])
+
+            node_ra = delta_ra_full[idx] + frac * (
+                delta_ra_full[idx + 1] - delta_ra_full[idx]
+            )
+
+            node_dec = delta_dec_full[idx] + frac * (
+                delta_dec_full[idx + 1] - delta_dec_full[idx]
+            )
+
+            node_points.append((node_ra, node_dec))
+
+        # Plot line of nodes
+
+        if len(node_points) == 2:
+            plt.plot(
+                [node_points[0][0], node_points[1][0]],
+                [node_points[0][1], node_points[1][1]],
+                ls="--",
+                lw=0.8,
+                color="tab:gray",
+                label="Line of nodes",
+                zorder=2,
+            )
+
+        else:
+            warnings.warn(
+                "Expected two intersections of the orbit "
+                "with the line of nodes, but found "
+                f"{len(node_points)}. The line of nodes "
+                "is not plotted.",
+            )
 
         delta_ra, delta_dec = kepler_model.calc_orbit(model_param, obs_time=None)
         residuals = kepler_model.calc_residuals(model_param)
@@ -784,12 +909,14 @@ class SamplingResults:
                 delta_dec[i] + cos_scan_ang[i] * res_item,
                 ls="none",
                 marker="s",
-                ms=5.0,
-                mew=1.2,
+                ms=4.0,
+                mew=1.0,
                 color=color,
                 mec="black",
                 zorder=zorder,
             )
+
+        # Plot barycenter
 
         plt.plot(
             0.0,
@@ -798,101 +925,159 @@ class SamplingResults:
             ms=5.0,
             mew=1.5,
             ls="none",
-            color="tab:gray",
-            mec="tab:gray",
-            zorder=3,
+            color="black",
+            mec="black",
             label="Barycenter",
+            zorder=3,
         )
 
-        # Position at time of periastron (in Julian years)
-
-        t_per = (
-            self.ref_epoch.tcb.jyear
-            + (model_param["per"] * model_param["tau"]) / 365.25
-        )
-
-        delta_ra_per, delta_dec_per = kepler_model.calc_orbit(
-            model_param,
-            obs_time=np.array([t_per]),
-        )
-
-        # Position at time of apastron (in Julian years)
-
-        period_years = model_param["per"] / 365.25
-
-        delta_ra_ap, delta_dec_ap = kepler_model.calc_orbit(
-            model_param,
-            obs_time=np.array([t_per + 0.5 * period_years]),
-        )
-
-        # Plot periastron and line of apsides
+        # Plot periastron
 
         plt.plot(
             delta_ra_per,
             delta_dec_per,
-            marker="+",
+            marker="x",
             ms=5.0,
             mew=1.5,
             ls="none",
-            color="tab:olive",
+            color="indianred",
             zorder=3,
             label=rf"Periastron ($t_\mathrm{{per}} = {t_per:.2f}$)",
         )
 
-        plt.plot(
-            [delta_ra_per, delta_ra_ap],
-            [delta_dec_per, delta_dec_ap],
-            ls=":",
-            lw=1,
-            marker="none",
-            color="tab:gray",
-            label="Line of apsides",
-        )
+        # Create and plot posterior positions at marker_time
 
-        # Signed distance perpendicular to the line of nodes
+        if marker_time is not None:
+            if isinstance(marker_time, str):
+                marker_time = Time(marker_time, format="isot", scale="utc")
 
-        pan = model_param["pan"]
-        node_perp = delta_ra_full * np.cos(pan) - delta_dec_full * np.sin(pan)
+            marker_jyear = marker_time.tcb.jyear
 
-        # Find the two crossings of the orbit with the line of nodes
+            delta_ra_post = np.empty(self.samples.shape[0])
+            delta_dec_post = np.empty(self.samples.shape[0])
 
-        cross_idx = np.where(node_perp[:-1] * node_perp[1:] < 0.0)[0]
+            for sample_idx, sample_item in enumerate(self.samples):
+                sample_param = param_list_to_dict(sample_item)
 
-        # Linear interpolation to the exact crossing
+                delta_ra_tmp, delta_dec_tmp = kepler_model.calc_orbit(
+                    sample_param,
+                    obs_time=np.array([marker_jyear]),
+                )
 
-        node_points = []
+                delta_ra_post[sample_idx] = delta_ra_tmp[0]
+                delta_dec_post[sample_idx] = delta_dec_tmp[0]
 
-        for idx in cross_idx:
-            frac = -node_perp[idx] / (node_perp[idx + 1] - node_perp[idx])
+            # plt.scatter(
+            #     delta_ra_post,
+            #     delta_dec_post,
+            #     s=5,
+            #     alpha=0.05,
+            #     color="dimgray",
+            #     edgecolors="none",
+            #     label=(f"Posterior ({marker_time.utc.strftime('%d %b %Y')})"),
+            # )
 
-            node_ra = delta_ra_full[idx] + frac * (
-                delta_ra_full[idx + 1] - delta_ra_full[idx]
+            # KDE of posterior position
+
+            positions = np.vstack((delta_ra_post, delta_dec_post))
+            kde = gaussian_kde(positions)
+
+            # Evaluation grid with padding
+
+            x_pad = 0.15 * np.ptp(delta_ra_post)
+            y_pad = 0.15 * np.ptp(delta_dec_post)
+
+            x_grid = np.linspace(
+                np.min(delta_ra_post) - x_pad,
+                np.max(delta_ra_post) + x_pad,
+                250,
             )
 
-            node_dec = delta_dec_full[idx] + frac * (
-                delta_dec_full[idx + 1] - delta_dec_full[idx]
+            y_grid = np.linspace(
+                np.min(delta_dec_post) - y_pad,
+                np.max(delta_dec_post) + y_pad,
+                250,
             )
 
-            node_points.append((node_ra, node_dec))
+            xx, yy = np.meshgrid(x_grid, y_grid)
 
-        # Plot line of nodes
+            density = kde(np.vstack((xx.ravel(), yy.ravel()))).reshape(xx.shape)
 
-        if len(node_points) == 2:
+            # Credible density thresholds
+
+            density_sorted = np.sort(density.ravel())[::-1]
+            cumsum = np.cumsum(density_sorted)
+            cumsum /= cumsum[-1]
+
+            level_997 = density_sorted[np.searchsorted(cumsum, 0.997)]
+
+            # Mask very low-density regions
+
+            density_masked = np.ma.masked_less(density, level_997)
+
+            # Filled KDE
+
+            plt.contourf(
+                xx,
+                yy,
+                density_masked,
+                levels=np.linspace(level_997, density.max(), 15),
+                cmap="Purples",
+                alpha=1.0,
+                zorder=0,
+            )
+
+            # Legend entry
+
             plt.plot(
-                [node_points[0][0], node_points[1][0]],
-                [node_points[0][1], node_points[1][1]],
-                ls="--",
-                lw=1.0,
-                color="tab:gray",
-                label="Line of nodes",
+                [],
+                [],
+                color="mediumpurple",
+                lw=5.0,
+                alpha=0.75,
+                label=(f"{marker_time.utc.strftime('%d %b %Y')} (posterior)"),
+                zorder=3,
             )
 
-        else:
-            warnings.warn(
-                "Expected two intersections of the orbit "
-                "with the line of nodes, but found "
-                f"{len(node_points)}. The line of nodes "
-                "is not plotted.",
+            # Mark orbital position at specified time
+
+            if truths is not None:
+                delta_ra_marker, delta_dec_marker = kepler_model.calc_orbit(
+                    truths,
+                    obs_time=np.array([marker_jyear]),
+                )
+
+                plt.plot(
+                    delta_ra_marker,
+                    delta_dec_marker,
+                    ls="none",
+                    marker="+",
+                    ms=7.0,
+                    mec="seagreen",
+                    mew=1.5,
+                    color="seagreen",
+                    label=(f"{marker_time.utc.strftime('%d %b %Y')} (truth)"),
+                    zorder=3,
+                )
+
+            # Plot maximum-likelihood position at marker_time
+
+            delta_ra_marker, delta_dec_marker = kepler_model.calc_orbit(
+                model_param,
+                obs_time=np.array([marker_jyear]),
+            )
+
+            plt.plot(
+                delta_ra_marker,
+                delta_dec_marker,
+                ls="none",
+                marker="+",
+                ms=7.0,
+                mec="indianred",
+                mew=1.5,
+                color="indianred",
+                label=(f"{marker_time.utc.strftime('%d %b %Y')} (ML)"),
+                zorder=3,
             )
 
         plt.xlabel(r"$\Delta$RA (mas)")
@@ -909,7 +1094,7 @@ class SamplingResults:
 
         ax.set_aspect("equal", adjustable="box")
 
-        plt.legend(loc="upper left", frameon=False, fontsize=8)
+        plt.legend(loc="upper left", frameon=False, fontsize=6, ncol=2)
 
         if plot_file is None:
             plt.show()
