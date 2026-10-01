@@ -40,8 +40,8 @@ Copyright 2026 Tomas Stolker
 .. |Docs Status| image:: https://readthedocs.org/projects/exogaia/badge/?version=latest
    :target: http://exogaia.readthedocs.io
 
-.. |DOI| image:: https://zenodo.org/badge/DOI/10.5281/zenodo.22989386.svg
-   :target: https://doi.org/10.5281/zenodo.22989386
+.. |DOI| image:: https://zenodo.org/badge/DOI/10.5281/zenodo.22989385.svg
+   :target: https://doi.org/10.5281/zenodo.22989385
 
 .. |License| image:: https://img.shields.io/github/license/tomasstolker/exogaia
    :target: https://github.com/tomasstolker/exogaia/blob/main/LICENSE
