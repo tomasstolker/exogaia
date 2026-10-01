@@ -6,6 +6,7 @@ import pandas as pd
 from astropy.time import Time
 
 from exogaia.models import KeplerModel, StarModel
+import pytest
 
 
 def test_calculate_excess_noise(least_squares: LeastSquares) -> None:
@@ -38,3 +39,17 @@ def test_kepler_model_solves_circular_orbit() -> None:
 
     np.testing.assert_allclose(x_coord, [1.0, 0.0], atol=1e-8)
     np.testing.assert_allclose(y_coord, [0.0, 1.0], atol=1e-8)
+
+
+@pytest.mark.parametrize(
+    "per, ecc",
+    [(0.0, 0.0), (10.0, -0.1), (10.0, 1.0)],
+)
+def test_kepler_model_rejects_invalid_orbit(per: float, ecc: float) -> None:
+    epoch_astrometry = SimpleNamespace(
+        data_table=pd.DataFrame({"relative_time_day": [0.0]}),
+        ref_epoch=Time(2016.0, format="jyear", scale="tcb"),
+    )
+
+    with pytest.raises(ValueError):
+        KeplerModel(epoch_astrometry, verbose=False).solve_kepler(per, ecc, 0.0)

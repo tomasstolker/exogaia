@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from exogaia.utils import (
+    binary_bias,
     calc_mass_from_sma,
     calc_sma_from_ti,
     param_dict_to_list,
@@ -68,3 +69,24 @@ def test_calc_mass_from_sma_returns_root_of_mass_function() -> None:
 def test_calc_mass_from_sma_validates_inputs(kwargs) -> None:
     with pytest.raises(ValueError):
         calc_mass_from_sma(**kwargs)
+
+
+def test_binary_bias_covers_resolution_regimes() -> None:
+    separation = np.array([0.0, 18.0, 360.0])
+
+    bias = binary_bias(
+        separation,
+        mass_ratio=0.5,
+        flux_ratio=0.5,
+        verbose=False,
+    )
+
+    assert bias[0] == pytest.approx(0.0)
+    assert np.isfinite(bias[1])
+    assert bias[2] == pytest.approx(-120.0)
+
+
+@pytest.mark.parametrize("mass_ratio, flux_ratio", [(-1.0, 0.5), (0.5, 1.1)])
+def test_binary_bias_validates_ratios(mass_ratio: float, flux_ratio: float) -> None:
+    with pytest.raises(ValueError):
+        binary_bias(np.array([1.0]), mass_ratio, flux_ratio, verbose=False)
