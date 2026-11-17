@@ -959,6 +959,7 @@ class GaiaAstrometry(EpochAstrometry):
                 "gaiadr3.nss_non_linear_spectro",
                 "gaiadr3.nss_two_body_orbit",
                 "gaiadr3.nss_vim_fl",
+                "gaiadr3.binary_masses",
             ]
 
         elif gaia_release == "DR4":
@@ -1078,7 +1079,7 @@ class GaiaAstrometry(EpochAstrometry):
         phot_g_mean_mag = float(gaia_result["phot_g_mean_mag"])
 
         if self.verbose:
-            print(f"\nRA = {ra_ref:.3f} deg +/- {ra_ref_error:.3f} mas")
+            print(f"RA = {ra_ref:.3f} deg +/- {ra_ref_error:.3f} mas")
             print(f"Dec = {dec_ref:.3f} deg +/- {dec_ref_error:.3f} mas")
             print(f"Parallax = {parallax:.3f} +/- {parallax_error:.3f} mas")
             print(f"Proper motion in RA = {pmra:.3f} +/- {pmra_error:.3f} mas/yr")

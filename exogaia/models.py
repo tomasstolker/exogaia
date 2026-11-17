@@ -15,13 +15,14 @@ from astropy.coordinates.representation.cartesian import CartesianRepresentation
 from astropy.time import Time
 from beartype import beartype, typing
 from matplotlib.figure import Figure
+from scipy.linalg import cho_factor, cho_solve
 
-from exogaia.utils import param_dict_to_list, print_section
+from exogaia.utils import fit_5param, param_dict_to_list, print_section
 
 
 class StarModel:
     """
-    Class with an astrometric model of a stellar track.
+    Astrometric model of a stellar path on the sky.
     """
 
     @beartype
@@ -409,38 +410,44 @@ class StarModel:
 
 class KeplerModel:
     """
-    Class with a Kepler model for simulating 1D
-    and 2D astrometry.
+    Astrometric model of a Keplerian orbit model.
     """
 
     @beartype
     def __init__(
         self,
         epoch_astrometry,
+        ref_epoch: typing.Optional[Real] = None,
         verbose: bool = True,
     ) -> None:
         """
         Parameters
         ----------
         epoch_astrometry : EpochAstrometry
-            ``EpochAstrometry`` object that contains the data.
+            Object containing the epoch astrometry.
+        ref_epoch : float, None
+            Reference epoch for the Keplerian orbit (Julian year).
+            This epoch defines the orbital phase parameter ``tau``
+            and must be the same when modeling the same orbit with
+            different astrometric datasets. If ``None``, use the
+            reference epoch of the epoch astrometry.
         verbose : bool
             Print information.
-
-        Returns
-        -------
-        NoneType
-            None
         """
 
         self.epoch_astrometry = epoch_astrometry
         self.data_table = epoch_astrometry.data_table
-        self.ref_epoch = self.epoch_astrometry.ref_epoch
         self.verbose = verbose
+
+        if ref_epoch is None:
+            self.ref_epoch = epoch_astrometry.ref_epoch
+        else:
+            self.ref_epoch = Time(ref_epoch, format="jyear", scale="tcb")
 
         if self.verbose:
             print_section("Kepler model", bound_char="=")
-            print(f"Epoch astrometry: {self.epoch_astrometry.__class__.__name__}")
+            print(f"Epoch astrometry: {epoch_astrometry.__class__.__name__}")
+            print(f"Orbit reference epoch: {self.ref_epoch.tcb.jyear:.4f}")
 
     @beartype
     def solve_kepler(
@@ -488,11 +495,10 @@ class KeplerModel:
             )
 
         if obs_time is None:
-            rel_time_day = self.data_table["relative_time_day"].to_numpy()
+            obs_time = self.data_table["obs_time_tcb"].to_numpy()
 
-        else:
-            rel_time_year = obs_time - self.ref_epoch.tcb.jyear
-            rel_time_day = rel_time_year * u.year.to(u.day)
+        rel_time_year = obs_time - self.ref_epoch.tcb.jyear
+        rel_time_day = rel_time_year * u.year.to(u.day)
 
         # t_per: time of periastron, relative to ref_epoch (days)
         # tau: fractional time of periastron, relative to ref_epoch
@@ -895,6 +901,81 @@ class KeplerModel:
 
         return residuals
 
+    @staticmethod
+    @beartype
+    def calc_orbit_batch(
+        param: typing.Dict[str, np.ndarray],
+        sma: np.ndarray,
+        aop: np.ndarray,
+        times: np.ndarray,
+        ref_epoch: Real,
+    ) -> typing.Tuple[np.ndarray, np.ndarray]:
+        """
+        Evaluate a batch of Keplerian orbits projected onto the sky.
+
+        Parameters
+        ----------
+        param : dict
+            Dictionary with arrays that contain the orbital elements.
+            One value per orbit for ``per`` (days), ``ecc``, ``tau``
+            (periastron time in orbital periods from ``ref_epoch``),
+            ``inc`` (rad), and ``pan`` (rad).
+        sma : np.ndarray
+            Semimajor axis of each orbit (mas).
+        aop : np.ndarray
+            Argument of periastron of each orbit (rad).
+        times : np.ndarray
+            Evaluation times shared by all orbits (TCB Julian years).
+        ref_epoch : float
+            Common orbital reference epoch (TCB Julian year).
+
+        Returns
+        -------
+        ra, dec : np.ndarray
+            Tangent-plane RA* and Dec offsets in mas, each with
+            shape ``(n_orbits, n_times)``.
+        """
+
+        per = param["per"][:, None]
+        ecc = param["ecc"][:, None]
+        tau = param["tau"][:, None]
+        inc = param["inc"]
+        pan = param["pan"]
+
+        if np.any(~np.isfinite(per) | (per <= 0.0)):
+            raise ValueError("Orbital periods must be finite and positive.")
+
+        if np.any(~np.isfinite(ecc) | (ecc < 0.0) | (ecc >= 1.0)):
+            raise ValueError("Eccentricities must be finite and satisfy 0 <= ecc < 1.")
+
+        # Broadcast one period and phase per orbit over the shared time grid
+
+        rel_time_day = (times[None, :] - ref_epoch) * 365.25
+        mean_anom = (rel_time_day - per * tau) * (2.0 * np.pi / per)
+        ecc_anom = kepler.solve(mean_anom, ecc)
+
+        # Dimensionless coordinates in the orbital plane
+
+        x_orb = np.cos(ecc_anom) - ecc
+        y_orb = np.sqrt(1.0 - ecc**2) * np.sin(ecc_anom)
+
+        # Thiele-Innes coefficients, using the same convention as calc_orbit()
+
+        cos_inc = np.cos(inc)
+
+        cos_aop, sin_aop = np.cos(aop), np.sin(aop)
+        cos_pan, sin_pan = np.cos(pan), np.sin(pan)
+
+        thiele_a = sma * (cos_aop * cos_pan - sin_aop * sin_pan * cos_inc)
+        thiele_b = sma * (cos_aop * sin_pan + sin_aop * cos_pan * cos_inc)
+        thiele_f = -sma * (sin_aop * cos_pan + cos_aop * sin_pan * cos_inc)
+        thiele_g = -sma * (sin_aop * sin_pan - cos_aop * cos_pan * cos_inc)
+
+        ra = thiele_b[:, None] * x_orb + thiele_g[:, None] * y_orb
+        dec = thiele_a[:, None] * x_orb + thiele_f[:, None] * y_orb
+
+        return ra, dec
+
     @beartype
     def plot_orbit(
         self,
@@ -1082,8 +1163,8 @@ class KeplerModel:
             label="Line of apsides",
         )
 
-        plt.xlabel(r"$\Delta$RA (mas)")
-        plt.ylabel(r"$\Delta$Dec (mas)")
+        ax.set_xlabel(r"$\Delta \alpha^*$ (mas)")
+        ax.set_ylabel(r"$\Delta \delta$ (mas)")
 
         x_lim = ax.get_xlim()
         y_lim = ax.get_ylim()
@@ -1105,5 +1186,678 @@ class KeplerModel:
             print_section("Plot orbit")
 
             print(f"Output file: {plot_file}")
+
+        return fig
+
+
+class HipparcosGaiaPMAnomaly:
+    """
+    Astrometric model of the HGCA proper-motion anomalies.
+
+    Orbital photocenter offsets are projected onto the Hipparcos and Gaia
+    scan directions and fitted with independent five-parameter astrometric
+    solutions. The Gaia astrometric reference epoch defines orbital ``tau``
+    for *both* missions. HGCA coordinate-specific central epochs define
+    the epochs of the fitted position offsets.
+    """
+
+    @beartype
+    def __init__(
+        self,
+        gaia_astrometry,
+        hipparcos_astrometry,
+        verbose: bool = True,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        gaia_astrometry : GaiaAstrometry
+            Gaia epoch astrometry.
+        hipparcos_astrometry : HipparcosAstrometry
+            Hipparcos epoch astrometry, including the HGCA data
+            after calling ``add_hgca()``).
+        verbose : bool
+            Print information.
+        """
+
+        if verbose:
+            print_section("Hipparcos-Gaia proper-motion anomalies", bound_char="=")
+
+        self.gaia_astrometry = gaia_astrometry
+        self.hipparcos_astrometry = hipparcos_astrometry
+        self.verbose = verbose
+
+        # HGCA vEDR3 uses the Gaia DR3/EDR3 astrometric solution
+
+        if self.gaia_astrometry.gaia_release != "DR3":
+            raise ValueError(
+                "HGCA vEDR3 requires Gaia DR3 astrometry, while "
+                f"Gaia {self.gaia_astrometry.gaia_release} data "
+                "was provided."
+            )
+
+        # Common orbital reference epoch (Julian year, TCB).
+        # This defines tau which is the time of periastron
+        # relative to the period and relative to the reference
+        # epoch. It is important to not use the Hipparcos
+        # reference epoch for it.
+
+        self.orbit_ref_epoch = gaia_astrometry.ref_epoch.tcb.jyear
+
+        if (
+            hipparcos_astrometry.hgca_epoch_gaia is None
+            or hipparcos_astrometry.hgca_epoch_hip is None
+        ):
+            raise ValueError(
+                "HGCA epochs are not available. Run the "
+                "add_hgca() method to set the attributes."
+            )
+
+        self.hgca_epoch_gaia = hipparcos_astrometry.hgca_epoch_gaia
+        self.hgca_epoch_hip = hipparcos_astrometry.hgca_epoch_hip
+        self.hgca_baseline = self.hgca_epoch_gaia - self.hgca_epoch_hip
+
+        if self.verbose:
+            hip = self.hipparcos_astrometry
+
+            print(f"Gaia input source ID: {gaia_astrometry.source_id}")
+            print(f"Hipparcos ID: {hip.hip_id}")
+
+            print(f"\nHGCA Gaia DR3 ID: {hip.gaia_dr3_id}")
+            print(f"HGCA catalog chi2: {hip.hgca_chisq}")
+
+            print("\nHGCA central epochs (RA, Dec) in Julian years:")
+            print(
+                f"   - Hipparcos: {np.array2string(self.hgca_epoch_hip, precision=4)}"
+            )
+            print(f"   - Gaia: {np.array2string(self.hgca_epoch_gaia, precision=4)}")
+            print(f"   - Baseline: {np.array2string(self.hgca_baseline, precision=4)}")
+
+            print("\nHGCA proper motions (mu_alpha*, mu_dec) in mas/yr:")
+            print(f"   - Hipparcos: {hip.hgca_pm_hip}")
+            print(f"   - HG: {hip.hgca_pm_hg}")
+            print(f"   - Gaia: {hip.hgca_pm_gaia}")
+            print(f"   - Gaia - HG: {hip.hgca_dpm_gaia_hg}")
+
+            print(f"\nOrbital reference epoch (TCB): {self.orbit_ref_epoch:.2f}")
+
+        # Initiate attributes populated by calc_pm_anomaly
+
+        self.hip_fit_param = None
+        self.gaia_fit_param = None
+        self.hip_fit_cov = None
+        self.gaia_fit_cov = None
+        self.pm_hip = None
+        self.pm_gaia = None
+        self.pm_hg = None
+        self.dpm_hip_hg = None
+        self.dpm_gaia_hg = None
+        self.dpm_hip_hg_amp = None
+        self.dpm_gaia_hg_amp = None
+        self.dpm_model = None
+        self.chi2_null = None
+        self.chi2_orbit = None
+        self.delta_chi2 = None
+
+    @beartype
+    def calc_pm_anomaly(
+        self,
+        model_param: dict,
+        add_noise: bool = False,
+    ) -> None:
+        """
+        Calculate the Hipparcos-Gaia proper-motion anomalies.
+
+        Fit a weighted five-parameter model to the synthetic along-scan
+        photocenter motion for each mission. Derive the long-term proper
+        motion from the fitted positions at the RA and Dec HGCA central
+        epochs, then subtract it from each mission's fitted proper motion.
+
+        Parameters
+        ----------
+        model_param : dict
+            Keplerian parameters: ``per`` (days), ``ecc``, ``tau`` (time of
+            periastron in orbital periods relative to ``self.orbit_ref_epoch``),
+            ``sma`` (photocenter semimajor axis in mas), and ``inc``, ``aop``,
+            and ``pan`` (radians).
+        add_noise : bool, optional
+            If ``True``, add independent Gaussian noise to the synthetic
+            along-scan positions using their measurement uncertainties.
+            Default is ``False``. The fits are weighted in either case.
+
+        Notes
+        -----
+        Stores the fitted parameters and covariances, proper motions, and
+        anomalies on the instance. ``dpm_model`` contains the signed anomaly
+        components in mas/yr of Hipparcos (RA*, Dec) and Gaia (RA*, Dec).
+        """
+
+        if self.verbose:
+            print_section("Calculate Hipparcos-Gaia proper motion")
+
+            print("Model parameters:")
+            for param_name, param_value in model_param.items():
+                print(f"   - {param_name} = {param_value:.2f}")
+
+        rng = np.random.default_rng()
+
+        fit_results = {}
+
+        # Fit each mission separately using its own
+        # observing times and scan geometry.
+
+        for mission, epoch_astrometry, hgca_epoch in (
+            ("hip", self.hipparcos_astrometry, self.hgca_epoch_hip),
+            ("gaia", self.gaia_astrometry, self.hgca_epoch_gaia),
+        ):
+            data_table = epoch_astrometry.data_table
+            obs_err = data_table["centroid_pos_error_al"].to_numpy()
+            sin_scan_ang = data_table["sin_scan_ang"].to_numpy()
+            cos_scan_ang = data_table["cos_scan_ang"].to_numpy()
+            parallax_factor_al = data_table["parallax_factor_al"].to_numpy()
+
+            # Use absolute TCB Julian years for the orbit and times relative
+            # to the mission reference epoch for the linear astrometric fit.
+
+            obs_year = data_table["obs_time_tcb"].to_numpy()
+            rel_yr = data_table["relative_time_year"].to_numpy()
+
+            # Use the same orbital reference epoch for both missions so
+            # that tau represents the same periastron passage in both fits.
+
+            kepler_model = KeplerModel(
+                epoch_astrometry=epoch_astrometry,
+                ref_epoch=self.orbit_ref_epoch,
+                verbose=False,
+            )
+
+            # Project the photocenter offsets onto the scan direction.
+
+            delta_ra, delta_dec = kepler_model.calc_orbit(
+                model_param, obs_time=obs_year
+            )
+
+            obs_pos_orbit = delta_ra * sin_scan_ang + delta_dec * cos_scan_ang
+
+            # Optionally simulate measurement noise
+
+            if add_noise:
+                obs_pos_orbit = obs_pos_orbit + rng.normal(0.0, obs_err)
+
+            # Recover the part of the orbital signal absorbed into
+            # the RA/Dec offset, parallax, and proper motion.
+
+            fit_param, fit_cov, _ = fit_5param(
+                obs_pos=obs_pos_orbit,
+                obs_err=obs_err,
+                rel_yr=rel_yr,
+                sin_scan_ang=sin_scan_ang,
+                cos_scan_ang=cos_scan_ang,
+                parallax_factor_al=parallax_factor_al,
+            )
+
+            # Propagate the fitted linear positions, so not the
+            # Keplerian orbit, to the HGCA central epochs for RA and Dec.
+
+            epoch_offset = hgca_epoch - epoch_astrometry.ref_epoch.tcb.jyear
+
+            transform = np.eye(5)
+            transform[0, 3] = epoch_offset[0]
+            transform[1, 4] = epoch_offset[1]
+
+            # Apply the same change of reference epoch to the covariance.
+            # The fitted parallax and proper-motion slopes are unchanged.
+
+            fit_param = transform @ fit_param
+            fit_cov = transform @ fit_cov @ transform.T
+
+            fit_results[mission] = (fit_param, fit_cov)
+
+        self.hip_fit_param, self.hip_fit_cov = fit_results["hip"]
+        self.gaia_fit_param, self.gaia_fit_cov = fit_results["gaia"]
+
+        # The last two fit parameters are the mission proper motions
+        # in (RA*, Dec) order, in mas/yr.
+
+        self.pm_hip = self.hip_fit_param[3:5].copy()
+        self.pm_gaia = self.gaia_fit_param[3:5].copy()
+
+        # Divide the fitted position difference by the HG baseline.
+        # RA and Dec each use their own baseline.
+
+        self.pm_hg = (
+            self.gaia_fit_param[:2] - self.hip_fit_param[:2]
+        ) / self.hgca_baseline
+
+        # Subtract the shared long-term proper motion from each mission's fit.
+
+        self.dpm_hip_hg = self.pm_hip - self.pm_hg
+        self.dpm_gaia_hg = self.pm_gaia - self.pm_hg
+        self.dpm_hip_hg_amp = np.linalg.norm(self.dpm_hip_hg)
+        self.dpm_gaia_hg_amp = np.linalg.norm(self.dpm_gaia_hg)
+
+        # Keep the signed components in the order used by the joint chi-square.
+
+        self.dpm_model = np.concatenate((self.dpm_hip_hg, self.dpm_gaia_hg))
+
+        if self.verbose:
+            print(
+                "\nHipparcos orbital PM:"
+                f"\n   RA  = {self.pm_hip[0]:.3f} mas/yr"
+                f"\n   Dec = {self.pm_hip[1]:.3f} mas/yr"
+            )
+
+            print(
+                "\nGaia orbital PM:"
+                f"\n   RA  = {self.pm_gaia[0]:.3f} mas/yr"
+                f"\n   Dec = {self.pm_gaia[1]:.3f} mas/yr"
+            )
+
+            print(
+                "\nHipparcos-Gaia long-term PM:"
+                f"\n   RA  = {self.pm_hg[0]:.3f} mas/yr"
+                f"\n   Dec = {self.pm_hg[1]:.3f} mas/yr"
+            )
+
+            print(
+                "\nHipparcos-HG PM anomaly:"
+                f"\n   RA  = {self.dpm_hip_hg[0]:.3f} mas/yr"
+                f"\n   Dec = {self.dpm_hip_hg[1]:.3f} mas/yr"
+                f"\n   Amplitude = {self.dpm_hip_hg_amp:.3f} mas/yr"
+            )
+
+            print(
+                "\nGaia-HG PM anomaly:"
+                f"\n   RA  = {self.dpm_gaia_hg[0]:.4f} mas/yr"
+                f"\n   Dec = {self.dpm_gaia_hg[1]:.4f} mas/yr"
+                f"\n   Amplitude = {self.dpm_gaia_hg_amp:.4f} mas/yr"
+            )
+
+    @beartype
+    def calc_chi2(self, model_param: dict) -> float:
+        """
+        Evaluate a photocenter orbit against the HGCA proper-motion anomalies.
+
+        Parameters
+        ----------
+        model_param : dict
+            Keplerian parameters passed to ``calc_pm_anomaly``.
+
+        Returns
+        -------
+        float
+            Joint chi-squared for the Hipparcos-HG and Gaia-HG anomalies.
+
+        Notes
+        -----
+        Stores the individual and joint chi-squared values for the orbit
+        and for a null model with zero anomaly. Delta chi-squared is
+        defined as null minus orbit, so positive values favor the orbit.
+        """
+
+        verbose_check = self.verbose
+        self.verbose = False
+        self.calc_pm_anomaly(model_param, add_noise=False)
+        self.verbose = verbose_check
+
+        if self.verbose:
+            print_section("Calculate HGCA chi-squared")
+
+            print("Model parameters:")
+            for param_name, param_value in model_param.items():
+                print(f"   - {param_name} = {param_value:.2f}")
+
+        hip = self.hipparcos_astrometry
+
+        obs_hip = hip.hgca_pm_hip - hip.hgca_pm_hg
+        obs_gaia = hip.hgca_pm_gaia - hip.hgca_pm_hg
+        obs_joint = np.concatenate((obs_hip, obs_gaia))
+
+        # Treat the three catalog proper motion estimates
+        # as independent before differencing.
+        # The shared HG term contributes +C_HG to both
+        # anomaly covariances and to their cross-covariance.
+
+        cov_hg = hip.hgca_cov_hg
+        cov_hip = hip.hgca_cov_hip + cov_hg
+        cov_gaia = hip.hgca_cov_gaia + cov_hg
+
+        # Assemble the 4x4 covariance in (Hip RA*, Hip Dec, Gaia RA*, Gaia Dec)
+        # order. The diagonal blocks are the covariances of each anomaly.
+
+        cov_joint = np.block(
+            [
+                [cov_hip, cov_hg],
+                [cov_hg, cov_gaia],
+            ]
+        )
+
+        def chi2_values(
+            obs: np.ndarray,
+            model: np.ndarray,
+            cov: np.ndarray,
+        ) -> typing.Tuple[Real, Real, Real]:
+            # Store the null and orbital residuals as separate columns.
+            # The null model predicts zero proper-motion anomaly.
+            residuals = np.column_stack((obs, obs - model))
+
+            # Reuse one Cholesky factorization to solve C x = r for both
+            # residual vectors, without explicitly inverting C.
+            factor = cho_factor(cov, lower=True)
+            solved = cho_solve(factor, residuals)
+
+            # Take the dot product r.T @ (C^-1 @ r) for each column.
+            chi2_null, chi2_orbit = np.sum(residuals * solved, axis=0)
+
+            # A positive delta chi-squared means the orbit fits better.
+            return chi2_null, chi2_orbit, chi2_null - chi2_orbit
+
+        # Evaluate each mission's anomaly separately for diagnostics.
+        hip_result = chi2_values(obs_hip, self.dpm_hip_hg, cov_hip)
+        gaia_result = chi2_values(obs_gaia, self.dpm_gaia_hg, cov_gaia)
+
+        # Evaluate both anomalies together, accounting for their covariance
+        # from the shared HG proper motion. The joint chi-squared is not
+        # the sum of the two individual values.
+        joint_result = chi2_values(obs_joint, self.dpm_model, cov_joint)
+
+        # Store the chi-squared for zero anomaly, the chi-squared for the
+        # predicted orbital anomaly, and the improvement (null minus orbit).
+        self.chi2_hip_null, self.chi2_hip_orbit, self.delta_chi2_hip = hip_result
+        self.chi2_gaia_null, self.chi2_gaia_orbit, self.delta_chi2_gaia = gaia_result
+        self.chi2_null, self.chi2_orbit, self.delta_chi2 = joint_result
+
+        if self.verbose:
+
+            for label, (chi2_null, chi2_orbit, delta_chi2) in (
+                ("Hipparcos-HG anomaly", hip_result),
+                ("Gaia-HG anomaly", gaia_result),
+                ("Joint anomalies", joint_result),
+            ):
+                print(
+                    f"\n{label}:"
+                    f"\n   - Null-model chi2 = {chi2_null:.2f}"
+                    f"\n   - Orbital-model chi2 = {chi2_orbit:.2f}"
+                    f"\n   - Delta chi2 = {delta_chi2:.2f}"
+                )
+
+        return self.chi2_orbit
+
+    @beartype
+    def plot_orbit(
+        self,
+        model_param: dict,
+        vector_years: float = 5.0,
+        plot_file: str | None = None,
+    ) -> Figure:
+        """
+        Plot the photocenter orbit, Hipparcos and Gaia model
+        positions, and fitted orbital proper-motion vectors.
+
+        Parameters
+        ----------
+        model_param : dict
+            Keplerian orbital parameters.
+        vector_years : float
+            Time interval used to scale the proper-motion vectors (yr).
+        plot_file : str, None
+            Output filename. Show the plot if None.
+
+        Returns
+        -------
+        Figure
+            Matplotlib figure with the orbit and proper-motion vectors.
+        """
+
+        if not np.isfinite(vector_years) or vector_years <= 0.0:
+            raise ValueError("'vector_years' must be positive and finite.")
+
+        # Calculate the orbital contributions to the HGCA proper motions
+
+        verbose_check = self.verbose
+        self.verbose = False
+        self.calc_pm_anomaly(model_param, add_noise=False)
+        self.verbose = verbose_check
+
+        if self.verbose:
+            print_section("Plot Hipparcos-Gaia orbit")
+
+            print("Model parameters:")
+            for param_name, param_value in model_param.items():
+                print(f"   - {param_name} = {param_value:.2f}")
+
+        hip_time = self.hipparcos_astrometry.data_table["obs_time_tcb"].to_numpy()
+
+        gaia_time = self.gaia_astrometry.data_table["obs_time_tcb"].to_numpy()
+
+        # Use the Gaia reference epoch for the orbital phase parameter tau
+
+        orbit_model = KeplerModel(
+            epoch_astrometry=self.hipparcos_astrometry,
+            ref_epoch=self.orbit_ref_epoch,
+            verbose=False,
+        )
+
+        # Plot one complete photocenter orbit
+
+        period_years = model_param["per"] / 365.25
+
+        time_full = np.linspace(
+            self.orbit_ref_epoch,
+            self.orbit_ref_epoch + period_years,
+            1000,
+        )
+
+        ra_full, dec_full = orbit_model.calc_orbit(
+            model_param,
+            obs_time=time_full,
+        )
+
+        # Orbital positions at the Hipparcos and Gaia observing epochs
+
+        ra_hip, dec_hip = orbit_model.calc_orbit(
+            model_param,
+            obs_time=hip_time,
+        )
+
+        ra_gaia, dec_gaia = orbit_model.calc_orbit(
+            model_param,
+            obs_time=gaia_time,
+        )
+
+        # Fitted orbital positions at the coordinate-specific HGCA epochs
+
+        hip_pos = self.hip_fit_param[:2]
+        gaia_pos = self.gaia_fit_param[:2]
+
+        # Create figure
+
+        fig, ax = plt.subplots(figsize=(4, 4))
+
+        ax.plot(
+            ra_full,
+            dec_full,
+            color="0.65",
+            lw=1.2,
+            label="Photocenter orbit",
+            zorder=1,
+        )
+
+        ax.scatter(
+            ra_hip,
+            dec_hip,
+            s=12,
+            color="cornflowerblue",
+            alpha=0.6,
+            label="Hipparcos model epochs",
+            zorder=2,
+        )
+
+        ax.scatter(
+            ra_gaia,
+            dec_gaia,
+            s=12,
+            color="sandybrown",
+            alpha=0.6,
+            label="Gaia model epochs",
+            zorder=2,
+        )
+
+        # Barycenter
+
+        ax.scatter(
+            0.0,
+            0.0,
+            marker="+",
+            s=70,
+            color="black",
+            label="Barycenter",
+            zorder=4,
+        )
+
+        # Fitted positions
+
+        ax.plot(
+            hip_pos[0],
+            hip_pos[1],
+            marker="s",
+            ms=5,
+            mew=1.2,
+            ls="none",
+            color="cornflowerblue",
+            mec="dimgray",
+            label="Hipparcos fitted position",
+            zorder=5,
+        )
+
+        ax.plot(
+            gaia_pos[0],
+            gaia_pos[1],
+            marker="s",
+            ms=5,
+            mew=1.2,
+            ls="none",
+            color="sandybrown",
+            mec="dimgray",
+            label="Gaia fitted position",
+            zorder=5,
+        )
+
+        # Connect the fitted Hipparcos and Gaia positions
+
+        ax.plot(
+            [hip_pos[0], gaia_pos[0]],
+            [hip_pos[1], gaia_pos[1]],
+            ls="--",
+            lw=1.0,
+            color="0.5",
+            alpha=0.7,
+            zorder=3,
+        )
+
+        # Proper-motion arrows, scaled from mas/yr to mas
+
+        def add_pm_arrow(position, pm, color, label, label_offset=(5, 4)):
+            dx, dy = vector_years * pm
+            x, y = position
+
+            ax.quiver(
+                x,
+                y,
+                dx,
+                dy,
+                angles="xy",
+                scale_units="xy",
+                scale=1,
+                color=color,
+                width=0.005,
+                headwidth=4,
+                headlength=5,
+                headaxislength=4,
+                zorder=3,
+            )
+
+            ax.annotate(
+                label,
+                xy=(x + dx, y + dy),
+                xytext=label_offset,
+                textcoords="offset points",
+                ha="left" if label_offset[0] >= 0 else "right",
+                va="center",
+                color=color,
+                fontsize=9,
+                zorder=4,
+            )
+
+        add_pm_arrow(hip_pos, self.pm_hip, "cornflowerblue", r"$\mu_{\rm Hip}$")
+
+        add_pm_arrow(gaia_pos, self.pm_gaia, "sandybrown", r"$\mu_{\rm Gaia}$")
+
+        add_pm_arrow(
+            hip_pos,
+            self.pm_hg,
+            "mediumseagreen",
+            r"$\mu_{\rm HG}$",
+            label_offset=(5, -6),
+        )
+
+        # Include the proper-motion arrow endpoints in the axis limits
+
+        positions = np.array(
+            [
+                hip_pos,
+                gaia_pos,
+                hip_pos,
+            ]
+        )
+
+        vectors = np.array(
+            [
+                self.pm_hip,
+                self.pm_gaia,
+                self.pm_hg,
+            ]
+        )
+
+        endpoints = positions + vector_years * vectors
+
+        all_points = np.vstack(
+            [
+                np.column_stack((ra_full, dec_full)),
+                positions,
+                endpoints,
+            ]
+        )
+
+        padding = 0.1 * np.ptp(all_points, axis=0)
+
+        ax.set_xlim(
+            all_points[:, 0].max() + padding[0],
+            all_points[:, 0].min() - padding[0],
+        )
+
+        ax.set_ylim(
+            all_points[:, 1].min() - padding[1],
+            all_points[:, 1].max() + padding[1],
+        )
+
+        ax.set_xlabel(r"$\Delta \alpha^*$ (mas)")
+        ax.set_ylabel(r"$\Delta \delta$ (mas)")
+
+        ax.set_aspect("equal", adjustable="box")
+
+        ax.legend(
+            loc="best",
+            frameon=False,
+            fontsize=8,
+        )
+
+        if self.verbose:
+            print(f"\nOutput file: {plot_file}")
+
+        if plot_file is None:
+            plt.show()
+        else:
+            fig.savefig(plot_file)
 
         return fig

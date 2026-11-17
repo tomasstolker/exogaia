@@ -1,5 +1,6 @@
 """
-Module with the ``CompletenessMap`` class.
+Module with the ``CompletenessMap`` and ``HipparcosGaiaCompleteness``
+classes.
 """
 
 from numbers import Real
@@ -15,13 +16,15 @@ from tqdm.auto import tqdm
 
 from exogaia.data import GaiaAstrometry
 from exogaia.leastsq import LeastSquares
+from exogaia.models import HipparcosGaiaPMAnomaly
 from exogaia.utils import print_section
 
 
-class CompletenessMap:
+class GaiaCompleteness:
     """
-    Class for computing companion detection completeness maps
-    as a function of companion mass and semi-major axis.
+    Class for computing Gaia companion detection
+    completeness maps as a function of companion
+    mass and semi-major axis.
     """
 
     @beartype
@@ -117,11 +120,11 @@ class CompletenessMap:
             Number of Monte Carlo realizations per grid point
             (default: 30).
         mass_points : np.ndarray, None
-            Grid of companion masses (Msun). If ``None``, a logarithmic
+            Companion masses (Msun). If ``None``, a logarithmic
             grid between 0.001 and 0.1 Msun is used.
         sma_points : np.ndarray, None
-            Grid of semi-major axes (au). If ``None``, a logarithmic
-            grid between 0.1 and 100 au is used.
+            Relative semi-major axes (au). If ``None``, a
+            logarithmic grid between 0.1 and 100 au is used.
         filter_sigma : float, None
             Width of an optional Gaussian filter used to reduce Monte
             Carlo sampling noise. The width is specified in grid points.
@@ -341,6 +344,241 @@ class CompletenessMap:
         ax.set_title(
             rf"Gaia {self.gaia_release} "
             rf"${n_sigma}\sigma$ completeness ({det_type})",
+            fontsize=10.0,
+        )
+
+        if plot_file is None:
+            plt.show()
+        else:
+            print(f"\nOutput file: {plot_file}")
+            fig.savefig(plot_file)
+
+        return fig
+
+
+class HipparcosGaiaCompleteness:
+    """
+    Class for computing companion detection completeness maps
+    from the Hipparcos-Gaia proper-motion anomaly (HGCA).
+    """
+
+    @beartype
+    def __init__(
+        self,
+        gaia_astrometry,
+        hipparcos_astrometry,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        gaia_astrometry : GaiaAstrometry
+            Simulated Gaia DR3 astrometry with the epoch data stored
+            in ``data_table``, and with the source parameters set.
+        hipparcos_astrometry : HipparcosAstrometry
+            Hipparcos epoch astrometry for which ``add_hgca()``
+            has been called.
+
+        Returns
+        -------
+        NoneType
+            None
+        """
+
+        if gaia_astrometry.primary_mass is None:
+            raise ValueError("The 'primary_mass' of 'gaia_astrometry' is not set.")
+
+        if gaia_astrometry.parallax is None:
+            raise ValueError(
+                "The parallax of 'gaia_astrometry' is not set. Run "
+                "'query_source' first."
+            )
+
+        self.gaia_astrometry = gaia_astrometry
+        self.hipparcos_astrometry = hipparcos_astrometry
+
+        self.pm_anomaly = HipparcosGaiaPMAnomaly(
+            gaia_astrometry=gaia_astrometry,
+            hipparcos_astrometry=hipparcos_astrometry,
+            verbose=False,
+        )
+
+        self.compl_map = None
+
+    @beartype
+    def calc_completeness(
+        self,
+        det_type: typing.Literal["joint", "hipparcos", "gaia"] = "joint",
+        n_sigma: Real = 3.0,
+        n_samples: int = 30,
+        mass_points: typing.Optional[np.ndarray] = None,
+        sma_points: typing.Optional[np.ndarray] = None,
+        filter_sigma: typing.Optional[Real] = None,
+        plot_file: typing.Optional[str] = None,
+    ) -> Figure:
+        """
+        Compute and plot a detection completeness map for the
+        Hipparcos-Gaia proper-motion anomaly.
+
+        For each grid point, ``n_samples`` random orbits are drawn
+        (eccentricity from a Beta distribution, isotropic orientation,
+        and uniform ``tau``). The orbital proper-motion anomaly is
+        forward modeled, and a realization is detected when its
+        significance, given the HGCA covariance, exceeds the
+        threshold. The companion is assumed to be dark. Gaussian
+        noise is added to the orbital positions using the along-scan
+        uncertainties of the actual Hipparcos and Gaia epochs.
+
+        Parameters
+        ----------
+        det_type : str
+            Proper-motion anomaly used for the detection: ``"joint"``
+            (Hipparcos-HG and Gaia-HG, 4 degrees of freedom),
+            ``"hipparcos"`` (Hipparcos-HG, 2 degrees of freedom), or
+            ``"gaia"`` (Gaia-HG, 2 degrees of freedom).
+        n_sigma : float
+            Gaussian-equivalent (two-sided) detection significance,
+            converted to a chi-square threshold (default: 3.0).
+        n_samples : int
+            Number of random orbits per grid point (default: 30).
+        mass_points : np.ndarray, None
+            Companion masses (Msun). Logarithmic grid between 0.001
+            and 0.1 Msun if ``None``.
+        sma_points : np.ndarray, None
+            Relative semi-major axes (au). Logarithmic grid between 0.1 and
+            100 au if ``None``.
+        filter_sigma : float, None
+            Width (grid points) of an optional Gaussian filter.
+        plot_file : str, None
+            File path for saving the plot. The plot is shown
+            interactively if ``None``.
+
+        Returns
+        -------
+        Figure
+            Matplotlib ``Figure`` object containing the completeness map.
+
+        Notes
+        -----
+        The completeness is stored in the ``compl_map`` attribute.
+        """
+
+        print_section("Calculate Hipparcos-Gaia completeness")
+
+        if n_sigma <= 0.0:
+            raise ValueError("'n_sigma' should be positive")
+
+        if n_samples <= 0:
+            raise ValueError("'n_samples' should be positive")
+
+        if mass_points is None:
+            mass_points = np.logspace(-3, -1, 30)
+
+        if sma_points is None:
+            sma_points = np.logspace(-1, 2, 30)
+
+        if np.any(mass_points <= 0.0):
+            raise ValueError("All companion masses should be positive")
+
+        if np.any(sma_points <= 0.0):
+            raise ValueError("All semi-major axes should be positive")
+
+        hip = self.hipparcos_astrometry
+        cov_hg = hip.hgca_cov_hg
+        cov_hip = hip.hgca_cov_hip + cov_hg
+        cov_gaia = hip.hgca_cov_gaia + cov_hg
+
+        if det_type == "joint":
+            cov = np.block([[cov_hip, cov_hg], [cov_hg, cov_gaia]])
+        elif det_type == "hipparcos":
+            cov = cov_hip
+        else:
+            cov = cov_gaia
+
+        n_dof_det = cov.shape[0]
+
+        chi2_threshold = chi2.isf(2.0 * norm.sf(n_sigma), df=n_dof_det)
+
+        print(f"Detection type: {det_type}")
+        print(f"Detection significance: {n_sigma:.1f} sigma")
+        print(f"Detection degrees of freedom: {n_dof_det}")
+        print(f"Chi-square threshold: {chi2_threshold:.2f}\n")
+
+        rng = np.random.default_rng()
+
+        prim_mass = self.gaia_astrometry.primary_mass[0]
+        parallax = self.gaia_astrometry.parallax
+
+        compl_map = np.zeros((mass_points.size, sma_points.size))
+
+        pbar = tqdm(total=mass_points.size * sma_points.size)
+
+        for mass_idx, mass_item in enumerate(mass_points):
+            mass_ratio = mass_item / prim_mass
+
+            for sma_idx, sma_item in enumerate(sma_points):
+                period = np.sqrt(sma_item**3 / (prim_mass + mass_item)) * 365.25
+
+                # Photocenter of a dark companion is the primary star
+                sma_mas = sma_item * parallax * mass_ratio / (1.0 + mass_ratio)
+
+                n_detect = 0
+
+                for _ in range(n_samples):
+                    model_param = {
+                        "per": float(period),
+                        "ecc": rng.beta(a=0.867, b=3.03),
+                        "tau": rng.uniform(0.0, 1.0),
+                        "sma": sma_mas,
+                        "inc": np.arccos(rng.uniform(-1.0, 1.0)),
+                        "aop": rng.uniform(0.0, 2.0 * np.pi),
+                        "pan": rng.uniform(0.0, 2.0 * np.pi),
+                    }
+
+                    self.pm_anomaly.calc_pm_anomaly(model_param, add_noise=True)
+
+                    if det_type == "joint":
+                        signal = self.pm_anomaly.dpm_model
+                    elif det_type == "hipparcos":
+                        signal = self.pm_anomaly.dpm_hip_hg
+                    else:
+                        signal = self.pm_anomaly.dpm_gaia_hg
+
+                    chi2_signal = signal @ np.linalg.solve(cov, signal)
+
+                    if chi2_signal > chi2_threshold:
+                        n_detect += 1
+
+                compl_map[mass_idx, sma_idx] = n_detect / n_samples
+
+                pbar.update(1)
+
+        pbar.close()
+
+        if filter_sigma is not None:
+            compl_map = gaussian_filter(compl_map, sigma=filter_sigma)
+
+        self.compl_map = compl_map
+
+        fig, ax = plt.subplots(figsize=(5, 3))
+
+        mesh = ax.pcolormesh(
+            sma_points,
+            mass_points,
+            100.0 * compl_map,
+            vmin=0.0,
+            vmax=100.0,
+        )
+
+        cbar = fig.colorbar(mesh, ax=ax)
+        cbar.set_label("Completeness (%)", fontsize=12)
+
+        ax.set_xlabel("Semi-major axis (au)", fontsize=12)
+        ax.set_ylabel(r"Companion mass ($M_\odot$)", fontsize=12)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+
+        ax.set_title(
+            rf"Hipparcos-Gaia ${n_sigma}\sigma$ completeness ({det_type})",
             fontsize=10.0,
         )
 

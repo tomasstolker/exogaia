@@ -696,7 +696,8 @@ class SamplingResults:
 
         print_section("Plot orbit")
 
-        fig = plt.figure(figsize=(4, 4))
+        print("")
+        fig = plt.figure(figsize=(3.8, 2))
         ax = plt.gca()
 
         rng = np.random.default_rng()
@@ -816,16 +817,16 @@ class SamplingResults:
 
         # Plot line of apsides
 
-        plt.plot(
-            [delta_ra_per, delta_ra_ap],
-            [delta_dec_per, delta_dec_ap],
-            ls=":",
-            lw=0.8,
-            marker="none",
-            color="tab:gray",
-            label="Line of apsides",
-            zorder=2,
-        )
+        # plt.plot(
+        #     [delta_ra_per, delta_ra_ap],
+        #     [delta_dec_per, delta_dec_ap],
+        #     ls=":",
+        #     lw=0.8,
+        #     marker="none",
+        #     color="tab:gray",
+        #     label="Line of apsides",
+        #     zorder=2,
+        # )
 
         # Signed distance perpendicular to the line of nodes
 
@@ -855,35 +856,35 @@ class SamplingResults:
 
         # Plot line of nodes
 
-        if len(node_points) == 2:
-            plt.plot(
-                [node_points[0][0], node_points[1][0]],
-                [node_points[0][1], node_points[1][1]],
-                ls="--",
-                lw=0.8,
-                color="tab:gray",
-                label="Line of nodes",
-                zorder=2,
-            )
-
-        else:
-            warnings.warn(
-                "Expected two intersections of the orbit "
-                "with the line of nodes, but found "
-                f"{len(node_points)}. The line of nodes "
-                "is not plotted.",
-            )
+        # if len(node_points) == 2:
+        #     plt.plot(
+        #         [node_points[0][0], node_points[1][0]],
+        #         [node_points[0][1], node_points[1][1]],
+        #         ls="--",
+        #         lw=0.8,
+        #         color="tab:gray",
+        #         label="Line of nodes",
+        #         zorder=2,
+        #     )
+        #
+        # else:
+        #     warnings.warn(
+        #         "Expected two intersections of the orbit "
+        #         "with the line of nodes, but found "
+        #         f"{len(node_points)}. The line of nodes "
+        #         "is not plotted.",
+        #     )
 
         delta_ra, delta_dec = kepler_model.calc_orbit(model_param, obs_time=None)
         residuals = kepler_model.calc_residuals(model_param)
 
         for i, res_item in enumerate(residuals):
             if i == 0:
-                color = "tab:green"
+                color = "goldenrod"
                 zorder = 3
 
             elif i == len(residuals) - 1:
-                color = "tab:red"
+                color = "goldenrod"
                 zorder = 3
 
             else:
@@ -933,17 +934,17 @@ class SamplingResults:
 
         # Plot periastron
 
-        plt.plot(
-            delta_ra_per,
-            delta_dec_per,
-            marker="x",
-            ms=5.0,
-            mew=1.5,
-            ls="none",
-            color="indianred",
-            zorder=3,
-            label=rf"Periastron ($t_\mathrm{{per}} = {t_per:.2f}$)",
-        )
+        # plt.plot(
+        #     delta_ra_per,
+        #     delta_dec_per,
+        #     marker="x",
+        #     ms=5.0,
+        #     mew=1.5,
+        #     ls="none",
+        #     color="indianred",
+        #     zorder=3,
+        #     label=rf"Periastron"+"\n"+rf"($t_\mathrm{{per}} = {t_per:.2f}$)",
+        # )
 
         # Create and plot posterior positions at marker_time
 
@@ -1092,9 +1093,11 @@ class SamplingResults:
         plt.xlim(lim_max, -lim_max)
         plt.ylim(-lim_max, lim_max)
 
-        ax.set_aspect("equal", adjustable="box")
+        # ax.set_aspect("equal", adjustable="box")
 
-        plt.legend(loc="upper left", frameon=False, fontsize=6, ncol=2)
+        plt.legend(
+            loc="upper left", frameon=False, fontsize=8, ncol=2, columnspacing=0.8
+        )
 
         if plot_file is None:
             plt.show()

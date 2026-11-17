@@ -11,7 +11,7 @@ import pandas as pd
 from beartype import beartype, typing
 from nsstools import NssSource
 
-# from scipy.linalg import cho_factor, cho_solve
+from scipy.linalg import cho_factor, cho_solve
 from scipy.optimize import brentq
 
 # @beartype
@@ -889,76 +889,80 @@ def read_hipparcos_header(file_name: Path) -> dict[str, int | float]:
     return header_out
 
 
-# @beartype
-# def fit_5param(
-#     obs_pos: np.ndarray,
-#     obs_err: np.ndarray,
-#     rel_yr: np.ndarray,
-#     sin_scan_ang: np.ndarray,
-#     cos_scan_ang: np.ndarray,
-#     parallax_factor_al: np.ndarray,
-# ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
-#     """
-#     Fit a 5-parameter astrometric model to 1D along-scan data.
-#
-#     Parameters
-#     ----------
-#     obs_pos : np.ndarray
-#         Along-scan positions (mas).
-#     obs_err : np.ndarray
-#         Along-scan uncertainties (mas).
-#     rel_yr : np.ndarray
-#         Observation times relative to the reference epoch in years.
-#     sin_scan_ang : np.ndarray
-#         Sine of the scan angle.
-#     cos_scan_ang : np.ndarray
-#         Cosine of the scan angle.
-#     parallax_factor_al : np.ndarray
-#         Along-scan parallax factors.
-#
-#     Returns
-#     -------
-#     np.ndarray
-#         Best-fit along-scan model in mas.
-#     np.ndarray
-#         Best-fit parameters, ordered as RA offset (mas),
-#         Dec offset (mas), parallax (mas), RA proper
-#         motion (mas/yr), and Dec proper motion (mas/yr).
-#     np.ndarray
-#         Parameter covariance matrix.
-#     """
-#
-#     # Design matrix for the linear regression
-#     design = np.column_stack(
-#         [
-#             sin_scan_ang,
-#             cos_scan_ang,
-#             parallax_factor_al,
-#             rel_yr * sin_scan_ang,
-#             rel_yr * cos_scan_ang,
-#         ]
-#     )
-#
-#     # Inverse covariance matrix
-#     # Correlated elements are set to zero
-#     inv_cov = np.diag(1.0 / obs_err**2)
-#
-#     # Generalized least-squares normal equations:
-#     # theta = (A^T C^-1 A)^-1 A^T C^-1 y
-#     normal_matrix = design.T @ inv_cov @ design
-#     normal_vector = design.T @ inv_cov @ obs_pos
-#
-#     cho_fac = cho_factor(normal_matrix, lower=True)
-#
-#     best_param = cho_solve(cho_fac, normal_vector)
-#     best_model = design @ best_param
-#
-#     param_cov = cho_solve(
-#         cho_fac,
-#         np.eye(design.shape[1]),
-#     )
-#
-#     return best_model, best_param, param_cov
+@beartype
+def fit_5param(
+    obs_pos: np.ndarray,
+    obs_err: np.ndarray,
+    rel_yr: np.ndarray,
+    sin_scan_ang: np.ndarray,
+    cos_scan_ang: np.ndarray,
+    parallax_factor_al: np.ndarray,
+) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Fit a 5-parameter astrometric model to 1D along-scan data.
+
+    Parameters
+    ----------
+    obs_pos : np.ndarray
+        Along-scan positions (mas).
+    obs_err : np.ndarray
+        Along-scan uncertainties (mas).
+    rel_yr : np.ndarray
+        Observation times relative to the reference epoch in years.
+    sin_scan_ang : np.ndarray
+        Sine of the scan angle.
+    cos_scan_ang : np.ndarray
+        Cosine of the scan angle.
+    parallax_factor_al : np.ndarray
+        Along-scan parallax factors.
+
+    Returns
+    -------
+    np.ndarray
+        Best-fit parameters, ordered as RA offset (mas),
+        Dec offset (mas), parallax (mas), RA proper
+        motion (mas/yr), and Dec proper motion (mas/yr).
+    np.ndarray
+        Parameter covariance matrix.
+    np.ndarray
+        Best-fit along-scan model in mas.
+    """
+
+    if not np.all(np.isfinite(obs_err) & (obs_err > 0.0)):
+        raise ValueError("Along-scan uncertainties must be finite and positive.")
+
+    # Design matrix for the linear regression
+    design = np.column_stack(
+        [
+            sin_scan_ang,
+            cos_scan_ang,
+            parallax_factor_al,
+            rel_yr * sin_scan_ang,
+            rel_yr * cos_scan_ang,
+        ]
+    )
+
+    # Inverse covariance matrix
+    # Assume independent AL measurements
+    inv_cov = np.diag(1.0 / obs_err**2)
+
+    # Generalized least-squares normal equations:
+    # theta = (A^T C^-1 A)^-1 A^T C^-1 y
+    normal_matrix = design.T @ inv_cov @ design
+    normal_vector = design.T @ inv_cov @ obs_pos
+
+    cho_fac = cho_factor(normal_matrix, lower=True)
+
+    fit_param = cho_solve(cho_fac, normal_vector)
+
+    fit_cov = cho_solve(
+        cho_fac,
+        np.eye(design.shape[1]),
+    )
+
+    best_model = design @ fit_param
+
+    return fit_param, fit_cov, best_model
 
 
 @beartype

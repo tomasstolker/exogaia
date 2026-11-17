@@ -10,14 +10,16 @@ from exogaia.leastsq import LeastSquares
 from exogaia.results import SamplingResults
 from exogaia.samplers import MCMCSampler, NestedSampler
 from exogaia.utils import param_dict_to_list
-from tests.test_leastsq import ORBIT_PARAMETERS, least_squares
+from tests.test_leastsq import ORBIT_PARAMETERS
+from tests.test_leastsq import least_squares as _least_squares_fixture
+
+least_squares = _least_squares_fixture
 
 
 def test_run_mcmc_sampler(least_squares: LeastSquares, tmp_path: Path) -> None:
     least_squares.best_param = np.array(param_dict_to_list(ORBIT_PARAMETERS))
-    least_squares.param_cov = np.diag(
-        np.array([0.1, 0.1, 0.1, 0.1, 0.1, 10.0, 0.05, 0.05, 0.1, 0.1, 0.1, 0.1]) ** 2
-    )
+    scales = [0.1, 0.1, 0.1, 0.1, 0.1, 10.0, 0.05, 0.05, 0.1, 0.1, 0.1, 0.1]
+    least_squares.param_cov = np.diag(np.array(scales) ** 2)
     sampler = MCMCSampler(
         epoch_astrometry=least_squares.epoch_astrometry,
         least_squares=least_squares,
@@ -37,10 +39,14 @@ def test_run_mcmc_sampler(least_squares: LeastSquares, tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def sampling_results(least_squares: LeastSquares, tmp_path: Path) -> SamplingResults:
+def sampling_results(
+    least_squares: LeastSquares, tmp_path: Path
+) -> SamplingResults:
     rng = np.random.default_rng(43)
     center = np.array(param_dict_to_list(ORBIT_PARAMETERS))
-    scale = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 10.0, 0.03, 0.03, 0.1, 0.1, 0.1, 0.1])
+    scale = np.array(
+        [0.1, 0.1, 0.1, 0.1, 0.1, 10.0, 0.03, 0.03, 0.1, 0.1, 0.1, 0.1]
+    )
     samples = rng.normal(center, scale, size=(20, 30, 12))
     pickle_file = tmp_path / "exogaia.pkl"
     with pickle_file.open("wb") as file:
@@ -70,10 +76,15 @@ def sampling_results(least_squares: LeastSquares, tmp_path: Path) -> SamplingRes
     ],
 )
 def test_plot_sampling_results(
-    sampling_results: SamplingResults, tmp_path: Path, method: str, kwargs: dict
+    sampling_results: SamplingResults,
+    tmp_path: Path,
+    method: str,
+    kwargs: dict,
 ) -> None:
     plot_file = tmp_path / f"{method}.png"
-    figure = getattr(sampling_results, method)(plot_file=str(plot_file), **kwargs)
+    figure = getattr(sampling_results, method)(
+        plot_file=str(plot_file), **kwargs
+    )
 
     assert figure is not None
     assert plot_file.is_file()

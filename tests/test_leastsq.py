@@ -7,7 +7,6 @@ from exogaia.leastsq import LeastSquares
 from exogaia.models import KeplerModel
 from exogaia.utils import param_dict_to_list
 
-
 ORBIT_PARAMETERS = {
     "ra_offset": 1.0,
     "dec_offset": -1.0,

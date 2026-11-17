@@ -8,7 +8,11 @@ from astropy.time import Time
 from astropy import units as u
 from astropy.coordinates import CartesianRepresentation
 
+from exogaia.leastsq import LeastSquares
 from exogaia.models import KeplerModel, StarModel
+from tests.test_leastsq import least_squares as _least_squares_fixture
+
+least_squares = _least_squares_fixture
 
 
 class GaiaAstrometry:
@@ -35,6 +39,12 @@ def stellar_parameters() -> dict[str, float]:
     }
 
 
+def test_calculate_excess_noise(least_squares: LeastSquares) -> None:
+    excess_noise, uncertainty = least_squares.calc_excess_noise(verbose=False)
+    assert excess_noise is not None and excess_noise > 0.0
+    assert uncertainty is not None and uncertainty >= 0.0
+
+
 def test_star_model_stores_astrometry() -> None:
     epoch_astrometry = SimpleNamespace(
         data_table=pd.DataFrame(),
@@ -51,8 +61,9 @@ def test_star_model_stores_astrometry() -> None:
 
 
 def test_kepler_model_solves_circular_orbit() -> None:
+    obs_time = [2016.0, 2016.0 + 2.5 / 365.25]
     epoch_astrometry = SimpleNamespace(
-        data_table=pd.DataFrame({"relative_time_day": [0.0, 2.5]}),
+        data_table=pd.DataFrame({"obs_time_tcb": obs_time}),
         ref_epoch=Time(2016.0, format="jyear", scale="tcb"),
     )
     model = KeplerModel(epoch_astrometry, verbose=False)
@@ -74,7 +85,8 @@ def test_kepler_model_rejects_invalid_orbit(per: float, ecc: float) -> None:
     )
 
     with pytest.raises(ValueError):
-        KeplerModel(epoch_astrometry, verbose=False).solve_kepler(per, ecc, 0.0)
+        model = KeplerModel(epoch_astrometry, verbose=False)
+        model.solve_kepler(per, ecc, 0.0)
 
 
 def test_star_model_calculates_accelerated_2d_track(monkeypatch) -> None:
@@ -117,6 +129,7 @@ def test_kepler_model_calculates_orbit_and_residuals() -> None:
     relative_time_day = np.linspace(0.0, 10.0, 13)
     data_table = pd.DataFrame(
         {
+            "obs_time_tcb": 2016.0 + relative_time_day / 365.25,
             "relative_time_year": relative_time_day / 365.25,
             "relative_time_day": relative_time_day,
             "sin_scan_ang": np.ones(13),
