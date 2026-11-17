@@ -13,10 +13,13 @@ from exogaia.utils import (
 @pytest.mark.parametrize("n_param", [5, 7, 9, 12])
 def test_parameter_dictionary_round_trip(n_param: int) -> None:
     names = ["ra_offset", "dec_offset", "parallax", "pm_ra", "pm_dec"]
+
     if n_param in (7, 9):
         names += ["pm_dot_ra", "pm_dot_dec"]
+
     if n_param == 9:
         names += ["pm_dotdot_ra", "pm_dotdot_dec"]
+
     if n_param == 12:
         names += ["per", "ecc", "tau", "sma", "inc", "aop", "pan"]
 
@@ -30,6 +33,7 @@ def test_parameter_dictionary_round_trip(n_param: int) -> None:
 def test_parameter_conversion_rejects_unsupported_lengths() -> None:
     with pytest.raises(ValueError):
         param_dict_to_list({"value": 1.0})
+
     with pytest.raises(ValueError):
         param_list_to_dict([1.0])
 
@@ -66,6 +70,8 @@ def test_calc_mass_from_sma_returns_root_of_mass_function() -> None:
         {"sma_0": 1.0, "period": 1.0, "parallax": 1.0, "primary_mass": 0.0},
     ],
 )
+
+
 def test_calc_mass_from_sma_validates_inputs(kwargs) -> None:
     with pytest.raises(ValueError):
         calc_mass_from_sma(**kwargs)

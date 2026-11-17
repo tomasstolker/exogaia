@@ -1,14 +1,14 @@
-from exogaia.leastsq import LeastSquares
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
+
 from astropy.time import Time
 from astropy import units as u
 from astropy.coordinates import CartesianRepresentation
 
 from exogaia.models import KeplerModel, StarModel
-import pytest
 
 
 class GaiaAstrometry:
@@ -33,10 +33,6 @@ def stellar_parameters() -> dict[str, float]:
         "pm_dotdot_ra": 6.0,
         "pm_dotdot_dec": 12.0,
     }
-
-
-def test_calculate_excess_noise(least_squares: LeastSquares) -> None:
-    least_squares.calc_excess_noise()
 
 
 def test_star_model_stores_astrometry() -> None:

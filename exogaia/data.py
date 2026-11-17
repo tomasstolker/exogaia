@@ -126,8 +126,8 @@ class GaiaAstrometry(EpochAstrometry):
             the argument of ``primary_mass`` is set to ``None``.
         gaia_release : str
             Gaia release (DR3, DR4, DR5) of the epoch astrometry.
-            Simulating data is possible for all releases, but querying
-            data will only be possible for the upcoming DR4 and DR5.
+            Simulating data is possible for all releases, but
+            querying epoch astrometry is only supported for DR4.
         verbose : bool
             Print some information.
 
@@ -234,6 +234,78 @@ class GaiaAstrometry(EpochAstrometry):
             self.data_table["relative_time_day"] = self.data_table[
                 "relative_time_year"
             ] * u.year.to(u.day)
+
+    @staticmethod
+    def _combine_ccds(
+        data_table: pd.DataFrame,
+        columns: typing.Optional[typing.List[str]] = None,
+    ) -> pd.DataFrame:
+        """
+        Combine CCD measurements into one measurement per transit.
+
+        Compute the inverse-variance-weighted mean of the along-scan
+        centroid positions. Propagate the uncertainty assuming
+        independent CCD measurements.
+
+        For other columns, except ``transit_id``, take the value
+        from the middle row within each transit in input row order.
+
+        Parameters
+        ----------
+        data_table : DataFrame
+            Individual CCD measurements. Must contain ``transit_id``,
+            ``centroid_pos_al``, and ``centroid_pos_error_al``.
+        columns : list of str or None, optional
+            Columns to return, in the requested order. If ``None``,
+            all input columns are returned in their original order.
+
+        Returns
+        -------
+        DataFrame
+            One row per transit with a reset of the indices.
+        """
+
+        if columns is None:
+            columns = data_table.columns.tolist()
+
+        # Use unique row labels so each position matches exactly one uncertainty
+        # data_table = data_table.reset_index(drop=True)
+
+        def combine_position(values: pd.Series) -> float:
+            errors = data_table.loc[values.index, "centroid_pos_error_al"].to_numpy(
+                dtype=float
+            )
+            weights = 1.0 / errors**2
+            return float(np.average(values.to_numpy(), weights=weights))
+
+        def combine_error(errors: pd.Series) -> float:
+            weights = 1.0 / errors.to_numpy(dtype=float) ** 2
+            return float(1.0 / np.sqrt(np.sum(weights)))
+
+        def middle_value(values: pd.Series):
+            return values.iloc[len(values) // 2]
+
+        # Use the middle CCD by default. The transit ID is the
+        # group key, so it does not need an aggregation function
+
+        aggregation = {col: middle_value for col in columns if col != "transit_id"}
+
+        # Give pandas the functions to call for the two weighted quantities
+
+        aggregation["centroid_pos_al"] = combine_position
+        aggregation["centroid_pos_error_al"] = combine_error
+
+        # Keep the transit ID as a column and preserve first-appearance order
+
+        combined = data_table.groupby(
+            "transit_id", sort=False, as_index=False, observed=True
+        ).agg(aggregation)
+
+        # Select columns only at the end so grouping and weighting
+        # can use the required input columns even when they are
+        # omitted from the output.
+
+        return combined.loc[:, columns]
 
     @staticmethod
     @beartype
@@ -848,16 +920,16 @@ class GaiaAstrometry(EpochAstrometry):
     @beartype
     def get_nss_tables(self, gaia_release="DR3") -> None:
         """
-        Method for downloading and storing the Gaia non-single star
-        (NSS) tables. The output will be stored in `ECSV files
+        Download the Gaia non-single star (NSS) tables.
+        The output will be stored in `ECSV files
         <https://docs.astropy.org/en/stable/io/ascii/ecsv.html>`_.
-        Currently, only ``gaia_release="DR3"`` is supported.
+        Gaia DR3 and DR4 are supported.
 
         Parameters
         ----------
         gaia_release : str
             Gaia release of which the NSS tables get downloaded.
-            Currently, the only possible argument is "DR3".
+            The possible arguments are "DR3" and "DR4".
 
         Returns
         -------
@@ -868,10 +940,11 @@ class GaiaAstrometry(EpochAstrometry):
         if self.verbose:
             print_section("Retrieve Gaia non-single star tables")
 
-        if gaia_release != "DR3":
+        if gaia_release not in ["DR3", "DR4"]:
             raise ValueError(
-                "The get_nss_table() only supports Gaia DR3. "
-                "Please set the 'gaia_release' argument to 'DR3'."
+                "The get_nss_tables() only supports Gaia "
+                "DR3 and DR4. Please set the 'gaia_release' "
+                "argument to 'DR3' or 'DR4'."
             )
 
         # List all Gaia tables
@@ -880,6 +953,7 @@ class GaiaAstrometry(EpochAstrometry):
 
         if gaia_release == "DR3":
             # Gaia DR3 NSS tables
+
             gaia_tables = [
                 "gaiadr3.nss_acceleration_astro",
                 "gaiadr3.nss_non_linear_spectro",
@@ -901,9 +975,6 @@ class GaiaAstrometry(EpochAstrometry):
                 "gaiadr4.nss_multiplicity",
                 "gaiadr4.nss_resolved_pair",
             ]
-
-        else:
-            raise ValueError("The '{self.gaia_release}' is not supported.")
 
         for table_item in gaia_tables:
             # Query Gaia NSS tables
@@ -933,9 +1004,9 @@ class GaiaAstrometry(EpochAstrometry):
         gaia_release: str = "DR3",
     ) -> typing.Dict[str, Real]:
         """
-        Method for retrieving stellar parameter from the Gaia catalog,
-        specifically the RA/Dec, parallax, proper motion, and G-band
-        magnitude.
+        Retrieve stellar parameters from the Gaia catalog,
+        specifically the RA/Dec, parallax, proper motion,
+        and G-band magnitude.
 
         Parameters
         ----------
@@ -943,9 +1014,8 @@ class GaiaAstrometry(EpochAstrometry):
             Gaia source ID for the selected ``gaia_release``.
         gaia_release : str
             Gaia data release (default: DR3). The release can be set
-            both here and with the class initialization such that the
-            stellar parameters can be retrieved from DR3, but epoch
-            astrometry can be simulated for DR4/DR5.
+            independently of the class initialization. Source
+            parameters can be retrieved from DR3 or DR4.
 
         Returns
         -------
@@ -958,17 +1028,18 @@ class GaiaAstrometry(EpochAstrometry):
         if self.verbose:
             print_section("Querying source")
 
-        self.source_id = source_id
-
-        if gaia_release != "DR3":
+        if gaia_release not in ["DR3", "DR4"]:
             raise ValueError(
-                "The 'query_source' method supports "
-                "currently only gaia_release='DR3'."
+                "The 'query_source' method supports only "
+                "'DR3' or 'DR4' as argument of gaia_release."
             )
+
+        if source_id is None:
+            raise ValueError("Please provide a Gaia 'source_id'.")
 
         if self.verbose:
             print(f"Gaia release: {gaia_release}")
-            print(f"Source ID: {self.source_id}\n")
+            print(f"Source ID: {source_id}\n")
 
         # Retrieve RA, Dec, parallax, proper motion, and G magnitude
 
@@ -979,12 +1050,20 @@ class GaiaAstrometry(EpochAstrometry):
                astrometric_excess_noise, astrometric_excess_noise_sig,
                non_single_star, nu_eff_used_in_astrometry
         FROM gaia{gaia_release.lower()}.gaia_source
-        WHERE source_id = {self.source_id}
+        WHERE source_id = {source_id}
         """
 
         gaia_job = Gaia.launch_job(gaia_query, dump_to_file=False, verbose=False)
 
-        gaia_result = gaia_job.get_results()[0]
+        gaia_results = gaia_job.get_results()
+
+        if len(gaia_results) == 0:
+            raise ValueError(
+                f"Gaia {gaia_release} source {source_id} "
+                f"was not found in Gaia release {gaia_release}."
+            )
+
+        gaia_result = gaia_results[0]
 
         ra_ref = float(gaia_result["ra"])
         ra_ref_error = float(gaia_result["ra_error"])
@@ -1006,15 +1085,18 @@ class GaiaAstrometry(EpochAstrometry):
             print(f"Proper motion in Dec = {pmdec:.3f} +/- {pmdec_error:.3f} mas/yr")
             print(f"G-band magnitude = {phot_g_mean_mag:.3f}")
 
-        # Effective wavenumber (i.e. pseudocolor) of the source
-        # used in the astrometric solution (um-1)
+        # Effective wavenumber (i.e. pseudocolor) of the
+        # source used in the astrometric solution (um-1)
+
         if not np.ma.is_masked(gaia_result["nu_eff_used_in_astrometry"]):
             nu_eff = float(gaia_result["nu_eff_used_in_astrometry"])
+
             if self.verbose:
                 print(f"Pseudocolor = {nu_eff:.2f} um-1")
 
         else:
             nu_eff = None
+
             if self.verbose:
                 print("Pseudocolor = None")
 
@@ -1029,13 +1111,16 @@ class GaiaAstrometry(EpochAstrometry):
         # tables of u0(g,c) by L. Lindegren (2023 Sep 13)
         # https://www.cosmos.esa.int/web/gaia/dr3-auxiliary-data
 
-        if nu_eff is None:
+        if nu_eff is not None:
+            self.u0_norm = self._interpolate_u0(self.g_mag, nu_eff)
+        else:
             self.u0_norm = None
 
+        if gaia_release == "DR3":
+            n_param = 5
         else:
-            self.u0_norm = self._interpolate_u0(self.g_mag, nu_eff)
-
-        n_param = 5
+            # See RUWE description in Gaia DR4 preliminary catalogue data model
+            n_param = 6
 
         uwe = np.sqrt(
             gaia_result["astrometric_chi2_al"]
@@ -1046,12 +1131,18 @@ class GaiaAstrometry(EpochAstrometry):
             print(f"\nUWE = {uwe:.2f}")
 
         if "ruwe" in gaia_result.columns:
-            if not np.ma.is_masked(gaia_result["ruwe"]) and self.u0_norm is not None:
+            if not np.ma.is_masked(gaia_result["ruwe"]):
                 ruwe = gaia_result["ruwe"]
+
                 if self.verbose:
                     print(f"RUWE = {ruwe:.2f}")
 
-                if not np.isclose(self.u0_norm, uwe / ruwe, rtol=1e-2, atol=0.0):
+                if gaia_release == "DR4" and ruwe != 0:
+                    self.u0_norm = uwe / ruwe
+
+                elif self.u0_norm is not None and not np.isclose(
+                    self.u0_norm, uwe / ruwe, rtol=1e-2, atol=0.0
+                ):
                     warnings.warn(
                         f"The renormalization value is {self.u0_norm:.4f} "
                         f"whereas the ratio of uwe/ruwe is {uwe/ruwe:.4f}."
@@ -1089,95 +1180,148 @@ class GaiaAstrometry(EpochAstrometry):
     @beartype
     def retrieve_data(
         self,
-        source_id: typing.Optional[typing.Union[int, np.int64, str]] = None,
+        source_id: typing.Union[int, np.int64, str],
         exclude_outliers: bool = True,
         combine_ccds: bool = False,
     ) -> dict:
         """
-        Method for retrieving the epoch astrometry for the selected
-        Gaia source. This will only be possible for the future DR4
-        and DR5 data releases.
+        Retrieve Gaia DR4 epoch astrometry and store it in
+        as the ``data_table`` attribute.
 
         Parameters
         ----------
         source_id : int, str
-            Gaia source ID for the selected ``gaia_release`` of the
-            class initialization.
+            Gaia DR4 source ID.
         exclude_outliers : bool
-            Exclude astrometry points that are flagged in the table
-            as outlier (default: True). To be implemented.
+            Exclude CCD observations not used by AGIS (default: True).
         combine_ccds : bool
-            Combine/average the measurements of the 9 CCDs per
+            Combine/average the measurements of the CCDs per
             transit ID (default: False). The weighted combination
             of the positions and uncertainties is calculated,
             assuming uncorrelated uncertainties between CCDs.
-            To be implemented.
 
         Returns
         -------
-        NoneType
-            None
+        dict
+            Dictionary with the retrieved stellar parameters:
+            RA, Dec, parallax, RA proper motion, Dec proper
+            motion, G-band magnitude.
         """
 
-        self.query_source(source_id, gaia_release=self.gaia_release)
+        if self.gaia_release != "DR4":
+            raise ValueError(
+                "The retrieve_data() method only supports "
+                "Gaia DR4. Please set the 'gaia_release' "
+                "argument of the object to 'DR4'."
+            )
+
+        self.source_id = int(source_id)
+
+        model_param = self.query_source(self.source_id, gaia_release="DR4")
 
         if self.verbose:
             print_section("Retrieving epoch astrometry")
-
-        self.source_id = source_id
 
         if self.verbose:
             print(f"Gaia release: {self.gaia_release}")
             print(f"Source ID: {self.source_id}")
 
-        warnings.warn(
-            "Retrieval of Gaia DR4 and DR5 epoch astrometry is not yet implemented."
+        epoch_data = Gaia.load_data(
+            ids=[source_id],
+            data_release="Gaia DR4",
+            data_structure="DATAMODEL_STANDARD",
+            retrieval_type="EPOCH_ASTROMETRY",
+            format="votable",
+            verbose=self.verbose,
         )
 
-        return {}
+        data_columns = [
+            "source_id",
+            "transit_id",
+            "obs_time_tcb",
+            "scan_pos_angle",
+            "parallax_factor_al",
+            "centroid_pos_al",
+            "centroid_pos_error_al",
+            "used_by_agis_al",
+        ]
 
-        # gaia_tables = [
-        #     "epoch_astrometry",
-        #     "bright_source_astrometry",
-        #     "nss_acceleration_astro",
-        #     "nss_two_body_orbit",
-        # ]
-        #
-        # for table_item in gaia_tables:
-        #     if self.verbose:
-        #         print(f"\nTable: gaia{self.gaia_release.lower()}.{table_item}")
-        #
-        #     # Query Gaia source ID in NSS tables for selected Gaia source ID
-        #
-        #     gaia_query = f"""
-        #     SELECT *
-        #     FROM gaia{self.gaia_release.lower()}.{table_item}
-        #     WHERE source_id = {self.source_id}
-        #     """
-        #
-        #     # Launch the Gaia job and get the results
-        #
-        #     gaia_job = Gaia.launch_job_async(
-        #         gaia_query, dump_to_file=False, verbose=False
-        #     )
-        #
-        #     gaia_result = gaia_job.get_results()
-        #
-        #     if self.verbose:
-        #         if len(gaia_result) > 0:
-        #             print("\nTable parameters:")
-        #             for param_item in gaia_result[0].columns:
-        #                 print(f"   - {param_item} = {gaia_result[0][param_item]}")
-        #
-        #     else:
-        #         if self.verbose:
-        #             print(f"\nSource not found in {table_item}")
-        #
-        #     if exclude_outliers:
-        #         pass
-        #
-        #     if combine_ccds:
-        #         pass
+        array_columns = [
+            "obs_time_tcb",
+            "scan_pos_angle",
+            "centroid_pos_al",
+            "centroid_pos_error_al",
+            "used_by_agis_al",
+        ]
+
+        data_frames = []
+
+        for tables in epoch_data.values():
+            for table in tables:
+                data_frame = table.to_pandas()
+                if set(data_columns).issubset(data_frame.columns):
+                    data_frames.append(data_frame[data_columns])
+
+        if not data_frames:
+            raise ValueError(
+                f"No Gaia DR4 epoch astrometry was returned for source {source_id}."
+            )
+
+        self.data_table = pd.concat(data_frames, ignore_index=True)
+
+        # Turns each row containing arrays into one row per array element
+        self.data_table = self.data_table.explode(array_columns)
+
+        # Drop rows with a NaN in one of the relevant columns
+        self.data_table = self.data_table.dropna(subset=data_columns)
+
+        # Reset the indices to start counting from row 0
+        self.data_table = self.data_table.reset_index(drop=True)
+
+        # Infer the data types of object columns and convert
+        self.data_table = self.data_table.infer_objects().convert_dtypes()
+
+        if exclude_outliers:
+            self.data_table = self.data_table[
+                self.data_table["used_by_agis_al"]
+            ].reset_index(drop=True)
+
+        if self.data_table.empty:
+            raise ValueError(
+                "No valid Gaia DR4 epoch astrometry "
+                f"was found for source {source_id}."
+            )
+
+        self.data_table = self.data_table.sort_values("obs_time_tcb", ignore_index=True)
+
+        self.data_table["obs_time_tcb"] = (
+            Time("J2010.0", scale="tcb")
+            + self.data_table["obs_time_tcb"].astype(np.int64).to_numpy() * u.ns
+        ).tcb.jyear
+
+        self.data_table["scan_pos_angle"] = pd.to_numeric(
+            self.data_table["scan_pos_angle"], errors="coerce"
+        )
+
+        if combine_ccds:
+            self.data_table = self._combine_ccds(self.data_table)
+
+        scan_ang = np.radians(self.data_table["scan_pos_angle"])
+        self.data_table["sin_scan_ang"] = np.sin(scan_ang)
+        self.data_table["cos_scan_ang"] = np.cos(scan_ang)
+
+        self.data_table["relative_time_year"] = (
+            self.data_table["obs_time_tcb"] - self.ref_epoch.tcb.jyear
+        )
+
+        self.data_table["relative_time_day"] = self.data_table[
+            "relative_time_year"
+        ] * u.year.to(u.day)
+
+        if self.verbose:
+            print(f"\nData shape: {self.data_table.shape}")
+
+        return model_param
 
     @beartype
     def retrieve_gaia_bh3(
@@ -1257,30 +1401,7 @@ class GaiaAstrometry(EpochAstrometry):
                 "centroid_pos_error_al",
             ]
 
-            # Select the central row/CCD for each transit
-            agg_dict = {col: lambda x: x.iloc[len(x) // 2] for col in cols_to_keep}
-
-            def weighted_mean(al_pos, al_err):
-                weight = 1.0 / al_err**2
-                return np.sum(weight * al_pos) / np.sum(weight)
-
-            def weighted_error(al_err):
-                return 1.0 / np.sqrt(np.sum(1.0 / al_err**2))
-
-            agg_dict["centroid_pos_al"] = lambda x: weighted_mean(
-                x.values, self.data_table.loc[x.index, "centroid_pos_error_al"].values
-            )
-
-            agg_dict["centroid_pos_error_al"] = weighted_error
-
-            df_transit = (
-                self.data_table[cols_to_keep]
-                .groupby("transit_id", sort=False)
-                .agg(agg_dict)
-                .reset_index(drop=True)
-            )
-
-            self.data_table = df_transit
+            self.data_table = self._combine_ccds(self.data_table, cols_to_keep)
 
         # Convert scan angles from degrees to radians
         # Store the sin and cos since only these are needed
@@ -1508,32 +1629,7 @@ class GaiaAstrometry(EpochAstrometry):
         # Combine CCDs per transit
 
         if combine_ccds:
-            cols_to_keep = list(self.data_table.columns)
-
-            # Select the central row/CCD for each transit
-            agg_dict = {col: lambda x: x.iloc[len(x) // 2] for col in cols_to_keep}
-
-            def weighted_mean(al_pos, al_err):
-                weight = 1.0 / al_err**2
-                return np.sum(weight * al_pos) / np.sum(weight)
-
-            def weighted_error(al_err):
-                return 1.0 / np.sqrt(np.sum(1.0 / al_err**2))
-
-            agg_dict["centroid_pos_al"] = lambda x: weighted_mean(
-                x.values, self.data_table.loc[x.index, "centroid_pos_error_al"].values
-            )
-
-            agg_dict["centroid_pos_error_al"] = weighted_error
-
-            df_transit = (
-                self.data_table[cols_to_keep]
-                .groupby("transit_id", sort=False)
-                .agg(agg_dict)
-                .reset_index(drop=True)
-            )
-
-            self.data_table = df_transit
+            self.data_table = self._combine_ccds(self.data_table)
 
         # Convert scan angles from degrees to radians
         # Store the sin and cos since only these are needed
