@@ -36,6 +36,9 @@ Below you can find tutorials that highlight the functionalities of ``exogaia``. 
 - :doc:`tutorials/occurrence_rate`
   – Sample planet masses and semi-major axes from occurrence rates
 
+- :doc:`tutorials/hipparcos_gaia`
+  – Model and analyse the Hipparcos-Gaia proper motion anomaly
+
 .. toctree::
    :hidden:
    :maxdepth: 1
@@ -49,3 +52,4 @@ Below you can find tutorials that highlight the functionalities of ``exogaia``. 
    tutorials/dr4_pre-release.ipynb
    tutorials/completeness.ipynb
    tutorials/occurrence_rate.ipynb
+   tutorials/hipparcos_gaia.ipynb
